@@ -1,0 +1,14 @@
+# 微信开发者工具本地个人配置（含本机设置，不入库）
+project.private.config.json
+
+# 素材生成用的原始大图（93MB，仅作为 build 脚本输入，运行期不使用）
+_breed_originals/
+
+# 本地构建脚本、调试截图、验证中间产物与工作记录（195MB）
+.workbuddy/
+
+# 常见噪音
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
