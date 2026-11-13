@@ -136,21 +136,25 @@ Game.prototype._doMatch = function (r1, c1, r2, c2, path) {
   var gain = Math.round(base * Math.pow(1.2, this.combo - 1) * (1 + (this.comboBonus || 0)));
   this.score += gain;
 
-  // 炸弹块：连带炸毁 3x3
-  if (a.bomb || b.bomb) {
-    var br = a.bomb ? r1 : r2, bc = a.bomb ? c1 : c2;
-    bombCells = g.explode3x3(br, bc);
-    A.sfx('bomb');
-    this.emit('bomb', { r: br, c: bc, cells: bombCells });
-  }
+  var bombAt = a.bomb ? [r1, c1] : b.bomb ? [r2, c2] : null;
 
   g.set(r1, c1, null);
   g.set(r2, c2, null);
+  // 炸弹块：在正常配对之外，额外随机炸掉一对同图案方块
+  if (bombAt) {
+    bombCells = g.explodeRandomPair();
+    if (bombCells.length) {
+      A.sfx('bomb');
+      this.emit('bomb', { r: bombAt[0], c: bombAt[1], cells: bombCells });
+    }
+  }
   this._boardChanged();
   A.sfx(this.combo > 1 ? 'combo' : 'match');
 
   // 锁链：相邻方块被消除时打破锁链
   var unlocked = g.breakChainsAround(r1, c1).concat(g.breakChainsAround(r2, c2));
+  for (var bi = 0; bi < bombCells.length; bi++)
+    unlocked = unlocked.concat(g.breakChainsAround(bombCells[bi][0], bombCells[bi][1]));
 
   this.emit('match', {
     r1: r1, c1: c1, r2: r2, c2: c2, path: path,
@@ -287,7 +291,7 @@ Game.prototype.useItem = function (type) {
   return false;
 };
 
-/** 炸弹道具：引爆指定格及其 3x3 */
+/** 炸弹道具：炸掉指定格，并随机炸掉一个同图案方块（成对消除） */
 Game.prototype.detonateAt = function (r, c) {
   if (!this.confirmBombMode()) {
     this.emit('itemfail', { type: 'bomb', reason: 'noBombItem' });
@@ -298,7 +302,7 @@ Game.prototype.detonateAt = function (r, c) {
     return false;
   }
   this._spendItem('bomb');
-  var cells = this.grid.explode3x3(r, c);
+  var cells = this.grid.explodePair(r, c);
   this._boardChanged();
   // 炸掉后可能解锁相邻锁链
   var unlocked = [];

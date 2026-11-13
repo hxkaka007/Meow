@@ -21,7 +21,7 @@ var SHOP_ITEMS = [
   // 闯关道具（显示名全局统一，不带 x1 数量后缀）
   { itemId: 'prop_hint', name: '提示', category: 'prop', price: 50, effectType: 'item', effectValue: 'hint', desc: '高亮一对可消除图', icon: 'prop_hint', name_en: 'Hint', desc_en: 'Highlight a matchable pair' },
   { itemId: 'prop_shuffle', name: '洗牌', category: 'prop', price: 100, effectType: 'item', effectValue: 'shuffle', desc: '洗牌剩余方块', icon: 'prop_shuffle', name_en: 'Shuffle', desc_en: 'Reshuffle remaining tiles' },
-  { itemId: 'prop_bomb', name: '炸弹', category: 'prop', price: 120, effectType: 'item', effectValue: 'bomb', desc: '炸掉 3×3 范围', icon: 'prop_bomb', name_en: 'Bomb', desc_en: 'Clear a 3x3 area' },
+  { itemId: 'prop_bomb', name: '炸弹', category: 'prop', price: 120, effectType: 'item', effectValue: 'bomb', desc: '炸掉指定方块及随机一个同图案方块', icon: 'prop_bomb', name_en: 'Bomb', desc_en: 'Clear a tile and a random matching tile' },
   { itemId: 'prop_time', name: '加时', category: 'prop', price: 80, effectType: 'item', effectValue: 'time', desc: '时间 +30 秒', icon: 'prop_time', name_en: '+Time', desc_en: 'Time +30s' }
 ];
 

@@ -256,15 +256,36 @@ Grid.prototype.breakChainsAround = function (r, c) {
   return out;
 };
 
-/** 炸弹：消除 3x3。返回被炸掉的坐标数组 */
-Grid.prototype.explode3x3 = function (r, c) {
-  var out = [];
-  for (var dr = -1; dr <= 1; dr++)
-    for (var dc = -1; dc <= 1; dc++) {
-      var nr = r + dr, nc = c + dc;
-      if (this.at(nr, nc)) { this.set(nr, nc, null); out.push([nr, nc]); }
-    }
+/**
+ * 炸弹成对消除：消除 (r,c)，并随机消除一个相同图案的方块。
+ * 棋盘上每种图案的格数始终为偶数，成对炸掉可避免残留图案无法配对。
+ * 返回被炸掉的坐标数组（无同图案格时只含指定格）。
+ */
+Grid.prototype.explodePair = function (r, c) {
+  var cell = this.at(r, c);
+  if (!cell) return [];
+  var selfIdx = r * this.cols + c;
+  var mates = [];
+  for (var i = 0; i < this.cells.length; i++) {
+    if (i !== selfIdx && this.cells[i] && this.cells[i].img === cell.img) mates.push(i);
+  }
+  var out = [[r, c]];
+  this.set(r, c, null);
+  if (mates.length) {
+    var idx = mates[Math.floor(Math.random() * mates.length)];
+    this.cells[idx] = null;
+    out.push([Math.floor(idx / this.cols), idx % this.cols]);
+  }
   return out;
+};
+
+/** 棋盘炸弹块：从剩余方块中随机选一格，成对炸掉 */
+Grid.prototype.explodeRandomPair = function () {
+  var spots = [];
+  for (var i = 0; i < this.cells.length; i++) if (this.cells[i]) spots.push(i);
+  if (!spots.length) return [];
+  var idx = spots[Math.floor(Math.random() * spots.length)];
+  return this.explodePair(Math.floor(idx / this.cols), idx % this.cols);
 };
 
 /** 移动元素：随机交换两个 move 方块的位置。返回 {a, b} 用于动画 */
