@@ -73,8 +73,7 @@ Home.prototype.onShow = function () {
   this.t = 0;
   this.settingsOpen = false;
   this._sickToastDone = false;
-  var daily = Save.checkDaily();
-  if (daily > 0) this.engine.toast(I.t('dailyReward', { n: daily }));
+  // 每日奖励由入口 game.js 统一发放并弹窗，主页不再单独发币 / 弹 toast
 };
 
 Home.prototype.update = function (dt) {
@@ -604,7 +603,7 @@ Home.prototype.onTouchUp = function (x, y) {
     else if (b === this.hitTask) { this.engine.goto('task'); }
     else if (b.key === 'checkin') { this.engine.goto('task'); }
     else if (b.key === 'event1' || b.key === 'event2') { this.engine.toast(I.t('eventSoon')); }
-    else if (b.key === 'play') { this.engine.goto('play', { level: Save.get('maxLevel') }); }
+    else if (b.key === 'play') { this.engine.goto('select'); }
     else if (b.key && b.key !== 'home') { this.engine.goto(b.key); }
   }
   if (this.settingsOpen) {

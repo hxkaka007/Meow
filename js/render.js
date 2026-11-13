@@ -16,7 +16,86 @@ function Engine() {
   this.lastT = 0;
   this.shakeT = 0;
   this._lastError = null;
+  this.modal = null;          // 全局模态弹窗（覆盖所有场景）
+  this._modalBtn = null;
+  this._modalRect = null;
+  this._modalPress = false;
 }
+
+/**
+ * 全局模态弹窗：opts = { title, desc, items: [{icon, name, count}], foot, btnText, onClose }
+ * 绘制在最上层并独占触摸输入，出现期间暂停场景逻辑（含关卡计时）。
+ * 同时打开多个时按调用顺序排队，关闭当前后自动显示下一个。
+ */
+Engine.prototype.showModal = function (opts) {
+  if (!opts) return;
+  if (this.modal) { (this._modalQueue = this._modalQueue || []).push(opts); return; }
+  this.modal = opts;
+  this._modalBtn = null;
+  this._modalPress = false;
+};
+
+Engine.prototype.closeModal = function () {
+  var m = this.modal;
+  var q = this._modalQueue = this._modalQueue || [];
+  this.modal = q.length ? q.shift() : null;
+  this._modalBtn = null;
+  this._modalPress = false;
+  if (m && m.onClose) m.onClose();
+};
+
+Engine.prototype._renderModal = function (ctx) {
+  var m = this.modal, W = this.W, H = this.H;
+  var pw = Math.min(W * 0.82, 340);
+  var items = m.items || [];
+  var cols = items.length > 2 ? 2 : Math.max(1, items.length);
+  var gap = 12, cardH = 88;
+  var cw = Math.min(120, (pw - 36 - gap * (cols - 1)) / cols);
+  var rows = Math.ceil(items.length / cols);
+  var gridTop = 96;
+  var gridH = rows ? rows * cardH + (rows - 1) * gap : 0;
+  var footY = gridTop + gridH + (rows ? 16 : 4);
+  var btnY = footY + 34;
+  var ph = btnY + 44 + 22;
+  var px = (W - pw) / 2, py = (H - ph) / 2;
+  this._modalRect = { x: px, y: py, w: pw, h: ph };
+
+  ctx.fillStyle = 'rgba(90,60,40,0.45)';
+  ctx.fillRect(0, 0, W, H);
+  D.panel(ctx, px, py, pw, ph, '#FFF9EF');
+  ctx.strokeStyle = '#EFA863';
+  ctx.lineWidth = 3;
+  D.roundRect(ctx, px, py, pw, ph, 18);
+  ctx.stroke();
+
+  D.text(ctx, m.title || '', W / 2, py + 40, 23, '#B96A33');
+  D.label(ctx, m.desc || '', W / 2, py + 74, 13, '#8A5A3B', { maxW: pw - 36, bold: false });
+
+  var totalW = cols * cw + (cols - 1) * gap;
+  var sx = W / 2 - totalW / 2;
+  for (var i = 0; i < items.length; i++) {
+    var col = i % cols, row = Math.floor(i / cols);
+    var cx = sx + col * (cw + gap), cy = py + gridTop + row * (cardH + gap);
+    ctx.fillStyle = '#FFF0DF';
+    D.roundRect(ctx, cx, cy, cw, cardH, 14);
+    ctx.fill();
+    if (!this.drawIcon(ctx, items[i].icon, cx + cw / 2 - 24, cy + 6, 48, 48)) {
+      D.text(ctx, '?', cx + cw / 2, cy + 30, 22, '#C38A5B');
+    }
+    D.label(ctx, items[i].name || '', cx + cw / 2, cy + 64, 15, '#8A5A3B', { maxW: cw - 8 });
+    D.text(ctx, '+' + (items[i].count || 1), cx + cw / 2, cy + 80, 13, '#E07A3C');
+  }
+
+  D.label(ctx, m.foot || '', W / 2, py + footY, 13, '#A98A70', { maxW: pw - 36, bold: false });
+  var btn = {
+    x: W / 2 - 90, y: py + btnY, w: 180, h: 44,
+    text: m.btnText || 'OK', color: '#F2934A', color2: '#FFC77C',
+    textColor: '#fff', fontSize: 18
+  };
+  btn._pressed = this._modalPress;
+  D.button(ctx, btn, 0);
+  this._modalBtn = btn;
+};
 
 Engine.prototype.init = function () {
   A.init();
@@ -368,7 +447,8 @@ Engine.prototype.update = function (dt) {
   if (this.toastT > 0) this.toastT -= dt;
   if (this.shakeT > 0) this.shakeT -= dt;
   try {
-    if (this.current && this.current.update) this.current.update(dt);
+    // 弹窗期间只暂停场景逻辑（含关卡计时），特效与 toast 仍正常推进
+    if (!this.modal && this.current && this.current.update) this.current.update(dt);
   } catch (err) {
     this._lastError = (err && err.message) || String(err);
     console.error('[update]', err);
@@ -477,6 +557,7 @@ Engine.prototype.render = function () {
     ctx.fillText(this.toastMsg, this.W / 2, this.H * 0.42 + 21);
     ctx.globalAlpha = 1;
   }
+  if (this.modal) this._renderModal(ctx);
   ctx.restore();
 };
 
@@ -485,6 +566,18 @@ Engine.prototype._bindInput = function () {
   var self = this;
   function handler(x, y, type) {
     try {
+      if (self.modal) {
+        if (type === 'down') {
+          self._modalPress = !!(self._modalBtn && D.hit(self._modalBtn, x, y));
+        } else {
+          var onBtn = self._modalBtn && D.hit(self._modalBtn, x, y);
+          var r = self._modalRect;
+          var outside = !r || !D.hit(r, x, y);
+          self._modalPress = false;
+          if (onBtn || outside) self.closeModal();
+        }
+        return;
+      }
       if (type === 'down') {
         self.tapCount = (self.tapCount || 0) + 1;
         self.lastTap = { x: x, y: y, t: 0 };

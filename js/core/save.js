@@ -24,6 +24,7 @@ var defaults = {
   },
   props: { hint: 1, shuffle: 1, bomb: 1, time: 1 },
   lastLoginDay: '',
+  dailyGiftDay: '',   // 每日奖励已发放的日期（本地日期，见 claimDailyRewards）
   adCount: 0,
   shareCount: 0,
   activityCoupon: false,
@@ -65,6 +66,13 @@ var Save = {
     for (var k in defaults) {
       if (d[k] === undefined) d[k] = JSON.parse(JSON.stringify(defaults[k]));
     }
+    // 道具背包：逐键补齐并钳制为非负整数，避免老档/损坏档出现 undefined、NaN 或负数
+    if (!d.props || typeof d.props !== 'object') d.props = {};
+    for (var p = 0; p < Shop.PROP_KEYS.length; p++) {
+      var pk = Shop.PROP_KEYS[p];
+      var n = Number(d.props[pk]);
+      d.props[pk] = isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }
     for (var i = 0; i < d.cats.length; i++) {
       var c = d.cats[i];
       if (!c.stats) c.stats = { hunger: 80, cleanliness: 80, happiness: 80 };
@@ -87,7 +95,8 @@ var Save = {
   },
   spendCoin: function (n) {
     this.load();
-    if (this.data.coin < n) return false;
+    n = Number(n);
+    if (!isFinite(n) || n <= 0 || this.data.coin < n) return false;
     this.data.coin -= n;
     this.save();
     return true;
@@ -132,23 +141,33 @@ var Save = {
     return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
   },
 
-  /** 每日登录奖励，返回奖励数（0 表示今天已领） */
-  checkDaily: function () {
+  /**
+   * 每日首次进入游戏：一次性发放登录喵币 + 4 种道具各 1 个。
+   * 用 dailyGiftDay 单次判重，返回 { coin, props }；当天已领取返回 null。
+   */
+  claimDailyRewards: function () {
     this.load();
     var today = this.todayKey();
-    if (this.data.lastLoginDay === today) return 0;
+    if (this.data.dailyGiftDay === today) return null;
+    this.data.dailyGiftDay = today;
     this.data.lastLoginDay = today;
     this.data.adCount = 0;
     this.data.shareCount = 0;
-    var reward = 100 + Math.min(200, this.data.maxLevel * 4);
-    this.data.coin += reward;
+    var coin = 100 + Math.min(200, this.data.maxLevel * 4);
+    this.data.coin += coin;
+    if (!this.data.props || typeof this.data.props !== 'object') this.data.props = {};
+    for (var i = 0; i < Shop.PROP_KEYS.length; i++) {
+      var key = Shop.PROP_KEYS[i];
+      this.data.props[key] = (Number(this.data.props[key]) || 0) + 1;
+    }
     this.save();
-    return reward;
+    return { coin: coin, props: Shop.PROP_KEYS.slice() };
   },
 
-  /** 过关结算：喵币产出（GDD 7.2） */
+  /** 过关结算：喵币产出（GDD 7.2）。重玩已通关关卡不发币、不推进进度 */
   onWin: function (levelId, score, timeLeft, stepsLeft, combo) {
     this.load();
+    var replay = levelId < this.data.maxLevel;
     var coinBonus = 0;
     for (var i = 0; i < this.data.cats.length; i++) {
       coinBonus += CT.typeById(this.data.cats[i].typeId).coinBonus || 0;
@@ -158,9 +177,9 @@ var Save = {
     var base = Math.round((50 + Math.min(150, levelId * 5)) * (1 + coinBonus));
     var comboReward = Math.min(100, (combo || 0) * 10);
     var leftReward = Math.min(50, Math.round(timeLeft || stepsLeft || 0));
-    var total = base + comboReward + leftReward;
+    var total = replay ? 0 : base + comboReward + leftReward;
 
-    if (levelId >= this.data.maxLevel) {
+    if (!replay && levelId >= this.data.maxLevel) {
       this.data.maxLevel = levelId + 1;
       for (var t = 0; t < CT.CAT_TYPES.length; t++) {
         var tp = CT.CAT_TYPES[t];
@@ -171,9 +190,9 @@ var Save = {
       }
     }
     if (score > this.data.bestScore) this.data.bestScore = score;
-    this.data.coin += total;
+    if (!replay) this.data.coin += total;
     this.save();
-    return { total: total, base: base, combo: comboReward, left: leftReward, coinBonus: coinBonus };
+    return { total: total, base: base, combo: comboReward, left: leftReward, coinBonus: coinBonus, replay: replay };
   },
 
   /** 看广告/分享奖励 */

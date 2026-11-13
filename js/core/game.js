@@ -36,18 +36,25 @@ Game.prototype.reset = function () {
   this.elapsed = 0;
 };
 
-Game.prototype.start = function (levelId) {
+/**
+ * 开局。items 传入账号级存档背包，逻辑层直接在其上扣减，
+ * 由场景层监听 itemspent 事件即时落盘；不传则为空背包。
+ */
+Game.prototype.start = function (levelId, items) {
   this.reset();
   this.cfg = Level.levelConfig(levelId);
   this.grid.generate(this.cfg);
   this.timeLeft = this.cfg.timeLimit;
   this.stepsLeft = this.cfg.stepLimit;
-  this.items = {
-    hint: this.cfg.items.hint,
-    shuffle: this.cfg.items.shuffle,
-    bomb: this.cfg.items.bomb,
-    time: this.cfg.items.time
-  };
+  if (items) {
+    var Shop = require('./shop.js');
+    this.items = items;
+    // 兜底：即使传入的存档对象缺键/异常，也规范为合法非负整数（就地修正存档）
+    for (var k = 0; k < Shop.PROP_KEYS.length; k++) {
+      var key = Shop.PROP_KEYS[k], n = Number(this.items[key]);
+      this.items[key] = isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }
+  }
   this.state = 'playing';
   this.emit('start', this.cfg);
 };
@@ -139,6 +146,7 @@ Game.prototype._doMatch = function (r1, c1, r2, c2, path) {
 
   g.set(r1, c1, null);
   g.set(r2, c2, null);
+  this._boardChanged();
   A.sfx(this.combo > 1 ? 'combo' : 'match');
 
   // 锁链：相邻方块被消除时打破锁链
@@ -177,6 +185,7 @@ Game.prototype._checkDead = function () {
       if (this.grid.findAnyPair()) return;
     }
     this.grid.shuffle();
+    this._boardChanged();
     this.emit('autoshuffle');
   }
 };
@@ -211,7 +220,7 @@ Game.prototype.update = function (dt) {
     if (this.moveTimer >= 10) {
       this.moveTimer = 0;
       var sw = this.grid.swapRandomMoves();
-      if (sw) this.emit('moveswap', sw);
+      if (sw) { this._boardChanged(); this.emit('moveswap', sw); }
       // 交换后可能出现死局
       this._checkDead();
     }
@@ -219,14 +228,33 @@ Game.prototype.update = function (dt) {
 };
 
 // ---------------- 道具 ----------------
+/** 安全取数量：undefined / NaN / 负数一律视为 0 */
+Game.prototype._itemCount = function (type) {
+  var n = Number(this.items[type]);
+  return isFinite(n) && n > 0 ? n : 0;
+};
+
+/** 棋盘布局变化后清掉提示高亮与选中，避免高亮指向错误格子 */
+Game.prototype._boardChanged = function () {
+  this.hintPair = null;
+  this.hintTimer = 0;
+  this.sel = null;
+};
+
+/** 扣减一个道具并广播，场景层据此即时落盘 */
+Game.prototype._spendItem = function (type) {
+  this.items[type] = Math.max(0, this._itemCount(type) - 1);
+  this.emit('itemspent', { type: type, left: this.items[type] });
+};
+
 Game.prototype.useItem = function (type) {
   if (this.state !== 'playing') return false;
-  if (this.items[type] <= 0) { this.emit('itemfail', { type: type, reason: 'none' }); return false; }
+  if (this._itemCount(type) <= 0) { this.emit('itemfail', { type: type, reason: 'none' }); return false; }
   switch (type) {
     case 'hint': {
       var pair = this.grid.findAnyPair();
-      if (!pair) return false;
-      this.items.hint--;
+      if (!pair) { this.emit('itemfail', { type: type, reason: 'noPair' }); return false; }
+      this._spendItem('hint');
       this.hintPair = pair;
       this.hintTimer = 5;
       A.sfx('select');
@@ -234,22 +262,22 @@ Game.prototype.useItem = function (type) {
       return true;
     }
     case 'shuffle': {
-      this.items.shuffle--;
+      this._spendItem('shuffle');
       this.grid.shuffle();
-      this.sel = null;
+      this._boardChanged();
       A.sfx('shuffle');
       this.emit('shuffle');
       return true;
     }
     case 'bomb': {
-      // 由场景进入“选择引爆目标”模式
-      if (this.items.bomb <= 0) return false;
+      // 由场景进入/退出“选择引爆目标”模式（真正引爆时才扣数量）
+      if (this._itemCount('bomb') <= 0) return false;
       this.emit('bombmode');
       return true;
     }
     case 'time': {
       if (this.cfg.timeLimit <= 0) { this.emit('itemfail', { type: type, reason: 'noTimeMode' }); return false; }
-      this.items.time--;
+      this._spendItem('time');
       this.timeLeft += 30;
       A.sfx('select');
       this.emit('addtime', 30);
@@ -261,10 +289,17 @@ Game.prototype.useItem = function (type) {
 
 /** 炸弹道具：引爆指定格及其 3x3 */
 Game.prototype.detonateAt = function (r, c) {
-  if (this.items.bomb <= 0) return false;
-  if (!this.grid.at(r, c)) return false;
-  this.items.bomb--;
+  if (!this.confirmBombMode()) {
+    this.emit('itemfail', { type: 'bomb', reason: 'noBombItem' });
+    return false;
+  }
+  if (!this.grid.at(r, c)) {
+    this.emit('itemfail', { type: 'bomb', reason: 'empty' });
+    return false;
+  }
+  this._spendItem('bomb');
   var cells = this.grid.explode3x3(r, c);
+  this._boardChanged();
   // 炸掉后可能解锁相邻锁链
   var unlocked = [];
   for (var i = 0; i < cells.length; i++)
@@ -277,6 +312,8 @@ Game.prototype.detonateAt = function (r, c) {
   return true;
 };
 
-Game.prototype.confirmBombMode = function () { return this.items.bomb > 0 && this.state === 'playing'; };
+Game.prototype.confirmBombMode = function () {
+  return this._itemCount('bomb') > 0 && this.state === 'playing';
+};
 
 module.exports = Game;

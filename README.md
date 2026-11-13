@@ -14,6 +14,10 @@
 - `assets/textures/` — 卡面图集、界面素材、分包资源
 - `game.json` — 小游戏配置与分包声明
 
+## 玩法文档
+
+- [CatLink · 连连看玩法（当前实现）](docs/catlink.md)
+
 ## 说明
 
 - `assets/textures/nest`、`breeds`、`home2` 三个分包目录根下的 `game.js` 是微信分包规范要求的入口占位文件，请勿删除。

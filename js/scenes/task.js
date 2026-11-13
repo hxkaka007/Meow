@@ -11,7 +11,6 @@
  */
 var D = require('../ui/draw.js');
 var Nav = require('../ui/nav.js');
-var Save = require('../core/save.js');
 var I = require('../core/i18n.js');
 var Decor = require('../ui/decor.js');
 var Theme = require('../core/theme.js');
@@ -337,7 +336,7 @@ TaskScene.prototype.onTouchUp = function (x, y) {
 
   for (var i = 0; i < this.rows.length; i++) {
     if (D.hit(this.rows[i].box, x, y)) {
-      this.engine.goto('play', { level: Save.get('maxLevel') });
+      this.engine.goto('select');
       return;
     }
   }
@@ -347,8 +346,7 @@ TaskScene.prototype.onTouchUp = function (x, y) {
   if (y >= nm.y && idx >= 0 && idx < Nav.TABS.length) {
     var route = Nav.TABS[idx].route;
     if (route === 'task') return;
-    if (route === 'play') this.engine.goto('play', { level: Save.get('maxLevel') });
-    else this.engine.goto(route);
+    this.engine.goto(route);
   }
 };
 

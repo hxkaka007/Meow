@@ -6,6 +6,7 @@ var Cozy = require('../ui/cozy.js');
 var Art = require('../ui/cozyArt.js');
 var Game = require('../core/game.js');
 var Save = require('../core/save.js');
+var Shop = require('../core/shop.js');
 var Level = require('../core/level.js');
 var Tasks = require('../core/tasks.js');
 var I = require('../core/i18n.js');
@@ -19,12 +20,15 @@ function Play() {
 
 Play.prototype.onShow = function (params) {
   this.level = (params && params.level) || Save.get('maxLevel');
+  // 重玩已通关关卡：不发喵币、不计任务进度
+  this.replay = this.level < Save.get('maxLevel');
   this.bombMode = false;
   this.popup = null;   // 'pause' | 'win' | 'lose' | 'shop'
+  this._shopFrom = null;
+  this._loseSub = '';
   this.countdown = 0;
-  this.game.start(this.level);
-  // 道具直接使用背包存档（商城购买持久化）
-  this.game.items = Save.load().props;
+  // 道具数量取账号级存档背包：逻辑层直接在其上扣减，itemspent 事件即时落盘
+  this.game.start(this.level, Save.load().props);
   // 猫咪加成：孟加拉豹猫 连击分数+20%（取最高）
   this.comboBonus = 0;
   var cats = Save.get('cats');
@@ -65,14 +69,15 @@ Play.prototype._bindEvents = function () {
     if (d.combo > 1) {
       self.engine.float(self._cx((d.c1 + d.c2) / 2), self._cy((d.r1 + d.r2) / 2) - 40,
         I.t('comboFloat', { n: d.combo }), '#ff8899', 20 + Math.min(d.combo * 2, 14));
-      if (d.combo >= 3) Tasks.add('combo', 1);
+      if (d.combo >= 3 && !self.replay) Tasks.add('combo', 1);
     }
     self.engine.float(self._cx((d.c1 + d.c2) / 2), self._cy((d.r1 + d.r2) / 2), '+' + d.gain, '#f0a030', 18);
-    // 每日任务：消除猫头
-    Tasks.add('clear', 2);
+    // 每日任务：消除猫头（重玩旧关不计进度）
+    if (!self.replay) Tasks.add('clear', 2);
   });
   g.on('bomb', function (d) {
-    Tasks.add('bomb', 1);
+    // 任务「使用 N 次炸弹」只统计道具引爆，棋盘炸弹块爆炸不计入
+    if (d.fromItem && !self.replay) Tasks.add('bomb', 1);
     (d.cells || []).forEach(function (rc) {
       self.anim.removes.push({ r: rc[0], c: rc[1], t: 0, delay: Math.random() * 0.15 });
       self.engine.burst(self._cx(rc[1]), self._cy(rc[0]), '#ff9a62', 10, { star: true });
@@ -93,21 +98,25 @@ Play.prototype._bindEvents = function () {
   g.on('shuffle', function () { self._flashBoard = 0.5; });
   g.on('moveswap', function () { self._flashBoard = 0.3; });
   g.on('win', function (d) {
+    self.bombMode = false;
     var reward = Save.onWin(self.level, d.score, d.timeLeft, self.game.cfg.stepLimit > 0 ? self.game.stepsLeft : 0, self.game.maxCombo);
     self._reward = reward;
     self.popup = 'win';
     self._stars = self._calcStars(d);
     self._loseStreak = 0;
     Save.set('loseStreak', 0);
-    if (Tasks.add('level', 1)) self.engine.toast(I.t('taskAllDone'));
+    if (!self.replay && Tasks.add('level', 1)) self.engine.toast(I.t('taskAllDone'));
   });
   g.on('lose', function (d) {
+    self.bombMode = false;
     self.popup = 'lose';
     self._loseReason = d.reason;
-    // "还差 N 分"：按场上剩余方块估算缺口
+    // 失败文案按真实失败条件：时间 / 步数耗尽，或还剩多少对未消除
     var remain = 0;
     try { remain = self.game.grid.remainCount(); } catch (e) { }
-    self._scoreGap = Math.max(10, remain * 10);
+    self._loseSub = I.t('loseSub', { n: Math.ceil(remain / 2) });
+    if (d.reason === 'time') self._loseSub = I.t('loseSubTime');
+    else if (d.reason === 'steps') self._loseSub = I.t('loseSubSteps');
     // 连续3关失败 → 猫咪骨折（GDD 9.1）
     var streak = (Save.get('loseStreak') || 0) + 1;
     Save.set('loseStreak', streak);
@@ -127,13 +136,20 @@ Play.prototype._bindEvents = function () {
     }
   });
   g.on('bombmode', function () {
-    self.bombMode = true;
-    self.engine.toast(I.t('bombTip'));
+    // 再次点击炸弹道具即退出选格模式
+    self.bombMode = !self.bombMode;
+    self.engine.toast(self.bombMode ? I.t('bombTip') : I.t('bombModeExit'));
   });
   g.on('addtime', function (n) { self.engine.float(self.engine.W / 2, self.engine.H * 0.2, I.t('addTimeFloat', { n: n }), '#7ec8c0', 22); });
+  // 道具消耗即时结算到账号存档，并重新对齐引用，避免存档对象被替换后道具无限使用
+  g.on('itemspent', function () { Save.set('props', self.game.items); });
   g.on('itemfail', function (d) {
-    if (d.reason === 'none') self.engine.toast(I.t('propUsedUp'));
-    else if (d.reason === 'noTimeMode') self.engine.toast(I.t('noTimeMode'));
+    if (d.reason === 'none' || d.reason === 'noBombItem') {
+      if (d.reason === 'noBombItem') self.bombMode = false;
+      self.engine.toast(I.t('propUsedUp'));
+    } else if (d.reason === 'noTimeMode') self.engine.toast(I.t('noTimeMode'));
+    else if (d.reason === 'noPair') self.engine.toast(I.t('hintNoPair'));
+    else if (d.reason === 'empty') self.engine.toast(I.t('tapEmpty'));
   });
 };
 
@@ -544,7 +560,7 @@ Play.prototype._renderBoard = function (ctx) {
 };
 
 Play.prototype._renderItems = function (ctx, W, H) {
-  var g = this.game, e = this.engine, en = this.en;
+  var g = this.game, e = this.engine;
   var items = [
     { key: 'hint', label: I.t('propHint'), c1: '#FFEAB9', c2: '#FFC476', edge: 'rgba(231,163,86,0.85)' },
     { key: 'shuffle', label: I.t('propShuffle'), c1: '#FFE2EA', c2: '#FFC3D3', edge: 'rgba(228,150,168,0.80)' },
@@ -555,8 +571,9 @@ Play.prototype._renderItems = function (ctx, W, H) {
   this.itemBtns = [];
   for (var i = 0; i < 4; i++) {
     var x = B.x + i * (B.w + B.gap), y = B.y, w = B.w, h = B.h;
-    var it = items[i], cnt = g.items[it.key] || 0;
-    var btn = { key: it.key, x: x, y: y, w: w, h: h, label: it.label, cnt: cnt };
+    var it = items[i], cnt = Math.max(0, Number(g.items[it.key]) || 0);
+    var disabled = g.cfg.timeLimit <= 0 && it.key === 'time';
+    var btn = { key: it.key, x: x, y: y, w: w, h: h, label: it.label, cnt: cnt, disabled: disabled };
     this.itemBtns.push(btn);
 
     ctx.save();
@@ -565,15 +582,13 @@ Play.prototype._renderItems = function (ctx, W, H) {
       ctx.scale(0.95, 0.95);
       ctx.translate(-(x + w / 2), -(y + h / 2));
     }
-    if (g.cfg.timeLimit <= 0 && it.key === 'time') ctx.globalAlpha = 0.62;
+    if (disabled) ctx.globalAlpha = 0.5;
 
-    // 中文用带美术字的原图；英文/图片未就绪用抹字版或纯绘制，再叠动态文字
-    var ok = Art.toolBtn(ctx, e, it.key, x, y, w, h, en);
+    // 统一用抹字版贴图 + 运行期 i18n 文案，避免贴图上的旧美术字与商品名不一致
+    var ok = Art.toolBtn(ctx, e, it.key, x, y, w, h, true);
     if (!ok) Cozy.toolBtn(ctx, x, y, w, h, it.c1, it.c2, it.edge);
-    if (en || !ok) {
-      var fs = Math.min(h * 0.28, w * 0.80 / Math.max(2, it.label.length * 0.62));
-      Art.embossText(ctx, it.label, x + w / 2, y + h * 0.70, fs, { stroke: 0.22 });
-    }
+    var fs = Math.min(h * 0.28, w * 0.80 / Math.max(2, it.label.length * 0.62));
+    Art.embossText(ctx, it.label, x + w / 2, y + h * 0.70, fs, { stroke: 0.22 });
 
     // 道具数量角标（小号，不抢画面）
     var br = Math.min(7.5, w * 0.098);
@@ -648,7 +663,7 @@ Play.prototype._popupWin = function (ctx, W, H) {
   var stars = this._stars || 1;
   var fish = Math.max(1, Math.round(this.game.score / 400));
   var items = [
-    ['coin', I.t('rewardCoin', { n: r.total })],
+    ['coin', this.replay ? I.t('replayNoReward') : I.t('rewardCoin', { n: r.total })],
     ['fish_gray', I.t('rewardFish', { n: fish })],
     ['star', I.t('rewardStar', { n: stars, m: 3 })]
   ];
@@ -659,8 +674,9 @@ Play.prototype._popupWin = function (ctx, W, H) {
   }
 
   var by = Y(424), bh = 78;
-  this._popBtn(ctx, 'next', I.t('winContinue'), X(54), by, 238 * s, bh * s, 'cream', s);
-  this._popBtn(ctx, 'home', I.t('winClaim'), X(348), by, 238 * s, bh * s, 'orange', s);
+  this._popBtn(ctx, 'next', I.t('winContinue'), X(36), by, 180 * s, bh * s, 'cream', s);
+  this._popBtn(ctx, 'select', I.t('selBtn'), X(230), by, 180 * s, bh * s, 'cream', s);
+  this._popBtn(ctx, 'home', I.t('winClaim'), X(424), by, 180 * s, bh * s, 'orange', s);
 };
 
 /** 闯关失败（failed-png 设计稿） */
@@ -682,21 +698,23 @@ Play.prototype._popupLose = function (ctx, W, H) {
   D.label(ctx, I.t('loseTitle'), X(320), Y(122), 60 * s, '#3E2A22', {
     stroke: 'rgba(255,250,242,0.8)', strokeW: 6 * s, maxW: 460 * s
   });
-  var gap = this._scoreGap || 0;
-  D.label(ctx, I.t('loseSub', { n: gap }), X(320), Y(206), 33 * s, '#6B4A38', {
+  D.label(ctx, this._loseSub || I.t('loseSub', { n: 0 }), X(320), Y(206), 33 * s, '#6B4A38', {
     maxW: 420 * s
   });
 
   var by = Y(276), bh = 80;
-  this._popBtn(ctx, 'retry', I.t('loseRetry'), X(56), by, 240 * s, bh * s, 'orange', s);
-  this._popBtn(ctx, 'home', I.t('loseExit'), X(346), by, 240 * s, bh * s, 'cream', s);
+  this._popBtn(ctx, 'retry', I.t('loseRetry'), X(40), by, 180 * s, bh * s, 'orange', s);
+  this._popBtn(ctx, 'shop', I.t('loseShop'), X(230), by, 180 * s, bh * s, 'cream', s);
+  this._popBtn(ctx, 'home', I.t('loseExit'), X(420), by, 180 * s, bh * s, 'cream', s);
+  this._popBtn(ctx, 'select', I.t('selBtn'), X(200), Y(366), 240 * s, 46 * s, 'cream', s);
 
-  // 面板下方：两张道具加成卡（设计稿 146x71@1x，横排居中）
+  // 面板下方：两张真实道具快捷购买卡（点击直接补买，价格取商品表）
   var cw = 280, ch = 78, gapX = 16;
   var cy = Y(PH + 20);
-  var chips = ['prop_yarn', 'prop_bomb'];
-  var tips = ['useYarnBoost', 'useBombBoost'];
-  for (var i = 0; i < 2; i++) {
+  var quick = ['hint', 'shuffle'];
+  for (var i = 0; i < quick.length; i++) {
+    var it = Shop.propItem(quick[i]);
+    if (!it) continue;
     var cx = X(32) + i * (cw + gapX) * s;
     var yy = cy;
     var rr = ch * 0.5 * s;
@@ -706,37 +724,44 @@ Play.prototype._popupLose = function (ctx, W, H) {
     D.roundRect(ctx, cx, yy, cw * s, ch * s, rr); ctx.fill();
     ctx.strokeStyle = '#7A4A32'; ctx.lineWidth = 2.2 * s;
     D.roundRect(ctx, cx, yy, cw * s, ch * s, rr); ctx.stroke();
-    this._popImg(ctx, chips[i], cx + 6 * s, yy + 3 * s, 66 * s, (ch - 6) * s);
-    D.label(ctx, I.t(tips[i], { n: 500 }), cx + 86 * s, yy + ch * 0.5 * s,
-      22 * s, '#8A4A22', { align: 'left', maxW: (cw - 98) * s });
+    this.engine.drawIcon(ctx, it.icon, cx + 6 * s, yy + 15 * s, 52 * s, 48 * s);
+    D.label(ctx, I.t('quickBuyFmt', { name: Shop.nameOf(it), n: it.price }),
+      cx + 70 * s, yy + ch * 0.5 * s, 20 * s, '#8A4A22',
+      { align: 'left', maxW: (cw - 78) * s });
+    this.popupBtns.push({ key: 'buy_' + quick[i], x: cx, y: yy, w: cw * s, h: ch * s });
   }
 };
 
-/** 暂停 / 道具商店（原有样式） */
+/** 暂停 / 道具商店 */
 Play.prototype._popupMenu = function (ctx, W, H) {
-  var pw = W * 0.78, ph = 320, px = (W - pw) / 2, py = (H - ph) / 2;
+  var pw = W * 0.78, ph = 380, px = (W - pw) / 2, py = (H - ph) / 2;
   Cozy.plate(ctx, px, py, pw, ph, 24);
 
   if (this.popup === 'pause') {
-    Cozy.title(ctx, I.t('paused'), W / 2, py + 56, 26);
-    this.popupBtns.push({ key: 'resume', text: I.t('resumeBtn'), x: W / 2 - 105, y: py + 120, w: 210, h: 52, color: '#7ec8c0', color2: '#9ad8d2' });
-    this.popupBtns.push({ key: 'retry', text: I.t('restartBtn'), x: W / 2 - 105, y: py + 184, w: 210, h: 46, color: '#f0b060', color2: '#f8c88a', fontSize: 18 });
-    this.popupBtns.push({ key: 'home', text: I.t('backHomeBtn'), x: W / 2 - 105, y: py + 240, w: 210, h: 42, color: '#c8b8a8', color2: '#d8ccc0', fontSize: 17 });
+    Cozy.title(ctx, I.t('paused'), W / 2, py + 46, 26);
+    this.popupBtns.push({ key: 'resume', text: I.t('resumeBtn'), x: W / 2 - 105, y: py + 72, w: 210, h: 44, color: '#7ec8c0', color2: '#9ad8d2' });
+    this.popupBtns.push({ key: 'shop', text: I.t('propShop'), x: W / 2 - 105, y: py + 124, w: 210, h: 44, color: '#a8d8c0', color2: '#c8e8d8', fontSize: 17 });
+    this.popupBtns.push({ key: 'retry', text: I.t('restartBtn'), x: W / 2 - 105, y: py + 176, w: 210, h: 44, color: '#f0b060', color2: '#f8c88a', fontSize: 18 });
+    this.popupBtns.push({ key: 'select', text: I.t('selBtn'), x: W / 2 - 105, y: py + 228, w: 210, h: 44, color: '#b0a8c0', color2: '#c2bad0', fontSize: 17 });
+    this.popupBtns.push({ key: 'home', text: I.t('backHomeBtn'), x: W / 2 - 105, y: py + 280, w: 210, h: 42, color: '#c8b8a8', color2: '#d8ccc0', fontSize: 17 });
   } else if (this.popup === 'shop') {
-    Cozy.title(ctx, I.t('shopTitle'), W / 2, py + 46, 24);
-    D.text(ctx, I.t('coinWith', { n: Save.get('coin') }), W / 2, py + 80, 16, '#A1663C');
-    var goods = [
-      { key: 'buy_hint', text: I.t('buyFmt', { name: I.t('propHint'), n: 50 }), cost: 50 },
-      { key: 'buy_shuffle', text: I.t('buyFmt', { name: I.t('propShuffle'), n: 100 }), cost: 100 },
-      { key: 'buy_bomb', text: I.t('buyFmt', { name: I.t('propBomb'), n: 120 }), cost: 120 },
-      { key: 'buy_time', text: I.t('buyFmt', { name: I.t('propTime'), n: 80 }), cost: 80 }
-    ];
+    Cozy.title(ctx, I.t('shopTitle'), W / 2, py + 40, 24);
+    D.text(ctx, I.t('coinWith', { n: Save.get('coin') }), W / 2, py + 72, 16, '#A1663C');
+    // 商品与价格只从 Shop 商品表生成，避免显示价与扣费价不一致
+    var list = Shop.byCategory('prop');
+    var goods = [];
+    for (var i = 0; i < list.length; i++) {
+      goods.push({
+        key: 'buy_' + list[i].effectValue,
+        text: I.t('buyFmt', { name: Shop.nameOf(list[i]), n: list[i].price })
+      });
+    }
     this.shopGoods = goods;
     for (var gi = 0; gi < goods.length; gi++) {
-      var row = { key: goods[gi].key, text: goods[gi].text, x: px + 24, y: py + 100 + gi * 44, w: pw - 48, h: 36, color: '#ffd9a8', color2: '#ffe8c8', fontSize: 15, textColor: '#8a5a20' };
+      var row = { key: goods[gi].key, text: goods[gi].text, x: px + 24, y: py + 94 + gi * 46, w: pw - 48, h: 38, color: '#ffd9a8', color2: '#ffe8c8', fontSize: 15, textColor: '#8a5a20' };
       this.popupBtns.push(row);
     }
-    this.popupBtns.push({ key: 'closeShop', text: I.t('closeBtn'), x: W / 2 - 60, y: py + 280, w: 120, h: 34, color: '#c8b8a8', color2: '#d8ccc0', fontSize: 15 });
+    this.popupBtns.push({ key: 'closeShop', text: I.t('closeBtn'), x: W / 2 - 60, y: py + 300, w: 120, h: 34, color: '#c8b8a8', color2: '#d8ccc0', fontSize: 15 });
   }
 
   // 弹窗按钮：与主界面同款软糖圆角按钮
@@ -763,11 +788,26 @@ Play.prototype._popupMenu = function (ctx, W, H) {
 Play.prototype.onTouchDown = function (x, y) {
   var press = function (arr) {
     if (!arr) return;
-    for (var i = 0; i < arr.length; i++) arr[i]._pressed = D.hit(arr[i], x, y);
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i]) arr[i]._pressed = D.hit(arr[i], x, y);
+    }
   };
   if (this.popup) { press(this.popupBtns); return; }
   press([this.backBtn, this.pauseBtn]);
   press(this.itemBtns);
+};
+
+/** 统一道具购买：白名单校验 + 商品表价格 + 即时落盘 + 对齐局内背包引用 */
+Play.prototype._buyProp = function (type) {
+  var it = Shop.propItem(type);
+  if (!it) return false;
+  if (!Save.spendCoin(it.price)) { this.engine.toast(I.t('noCoinShort')); return false; }
+  var props = Save.get('props');
+  props[type] = (Number(props[type]) || 0) + 1;
+  Save.save();
+  this.game.items = props;
+  this.engine.toast(I.t('propPlus', { name: Shop.nameOf(it) }));
+  return true;
 };
 
 Play.prototype.onTouchUp = function (x, y) {
@@ -776,6 +816,7 @@ Play.prototype.onTouchUp = function (x, y) {
     if (!arr) return;
     for (var i = 0; i < arr.length; i++) {
       var b = arr[i];
+      if (!b) continue;
       b._pressed = false;
       if (D.hit(b, x, y) && fn) fn(b);
     }
@@ -786,29 +827,23 @@ Play.prototype.onTouchUp = function (x, y) {
         case 'next': self.level++; self.onShow({ level: self.level }); break;
         case 'retry': self.onShow({ level: self.level }); break;
         case 'home': self.engine.goto('home'); break;
+        case 'select': self.engine.goto('select'); break;
         case 'resume': self.popup = null; break;
-        case 'shop': self.popup = 'shop'; break;
-        case 'closeShop': self.popup = self.game.state === 'lose' ? 'lose' : null; break;
+        case 'shop': self._shopFrom = self.popup === 'lose' ? 'lose' : 'pause'; self.popup = 'shop'; break;
+        case 'closeShop': self.popup = self._shopFrom || null; break;
         default:
-          if (b.key.indexOf('buy_') === 0) {
-            var type = b.key.slice(4);
-            var cost = { hint: 50, shuffle: 100, bomb: 120, time: 80 }[type];
-            if (Save.spendCoin(cost)) {
-              Save.get('props')[type] = (Save.get('props')[type] || 0) + 1;
-              Save.save();
-              self.engine.toast(I.t('boughtOk2'));
-            } else self.engine.toast(I.t('noCoinShort'));
-          }
+          if (b.key.indexOf('buy_') === 0) self._buyProp(b.key.slice(4));
       }
     });
     return;
   }
   release([this.backBtn, this.pauseBtn], function (b) {
     if (b.key === 'back') self.engine.goto('home');
-    else if (b.key === 'pause') self.popup = 'pause';
+    else if (b.key === 'pause') { self.bombMode = false; self.popup = 'pause'; }
   });
   release(this.itemBtns, function (b) {
-    if (self.bombMode && b.key !== 'bomb') return;
+    if (b.disabled) return;
+    if (self.bombMode && b.key !== 'bomb') { self.engine.toast(I.t('bombBlocked')); return; }
     self.game.useItem(b.key);
   });
 
@@ -817,8 +852,13 @@ Play.prototype.onTouchUp = function (x, y) {
   var gy = Math.floor((y - this.by) / this.cell);
   if (gx >= 0 && gy >= 0 && gx < this.game.grid.cols && gy < this.game.grid.rows) {
     if (this.bombMode) {
-      if (this.game.detonateAt(gy, gx)) this.bombMode = false;
-      else this.engine.toast(I.t('tapEmpty'));
+      if (!this.game.confirmBombMode()) {
+        this.bombMode = false;
+        this.engine.toast(I.t('propUsedUp'));
+      } else if (this.game.detonateAt(gy, gx)) {
+        this.bombMode = false;
+      }
+      // 空格 / 道具耗尽由 itemfail 事件给出对应提示
     } else {
       this.game.tapCell(gy, gx);
     }

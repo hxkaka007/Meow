@@ -30,7 +30,7 @@ Bag.prototype.layout = function () {
     var n = props[PROPS[i][0]] || 0;
     if (n <= 0) continue;
     var it = Shop.byId('prop_' + PROPS[i][0]);
-    this.rows.push({ icon: PROPS[i][1], name: it ? it.name : PROPS[i][0], count: n, y: y });
+    this.rows.push({ icon: PROPS[i][1], name: it ? Shop.nameOf(it) : PROPS[i][0], count: n, y: y });
     y += 62;
   }
   // 物品（inventory 计数）
@@ -39,7 +39,7 @@ Bag.prototype.layout = function () {
     if (!inv[key]) continue;
     var it2 = Shop.byId(key);
     if (!it2) continue;
-    this.rows.push({ icon: it2.icon, name: it2.name, count: inv[key], y: y });
+    this.rows.push({ icon: it2.icon, name: Shop.nameOf(it2), count: inv[key], y: y });
     y += 62;
   }
   this.empty = this.rows.length === 0;

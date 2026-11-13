@@ -17,7 +17,7 @@ var IMG = 'assets/textures/ui/';
 
 var TABS = [
   { route: 'home', label: 'home', icon: 'nav_home' },
-  { route: 'play', label: 'game', icon: 'nav_game' },
+  { route: 'select', label: 'selTab', icon: 'nav_game' },
   { route: 'cats', label: 'room', icon: 'nav_room' },
   { route: 'shop', label: 'shop', icon: 'nav_shop' },
   { route: 'hospital', label: 'hospital', icon: 'nav_hospital' },

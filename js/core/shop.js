@@ -18,11 +18,11 @@ var SHOP_ITEMS = [
   { itemId: 'home_2', name: '咪窝 II', category: 'home', price: 500, effectType: 'home', effectValue: 2, desc: '新增一个咪窝（可养 3 只）', icon: 'home', name_en: 'Room II', desc_en: 'One more room (3 cats)' },
   { itemId: 'home_3', name: '咪窝 III', category: 'home', price: 1000, effectType: 'home', effectValue: 3, desc: '新增一个咪窝（可养 3 只）', icon: 'home', name_en: 'Room III', desc_en: 'One more room (3 cats)' },
   { itemId: 'home_4', name: '咪窝 IV', category: 'home', price: 2000, effectType: 'home', effectValue: 4, desc: '新增一个咪窝（可养 3 只）', icon: 'home', name_en: 'Room IV', desc_en: 'One more room (3 cats)' },
-  // 闯关道具
-  { itemId: 'prop_hint', name: '提示 x1', category: 'prop', price: 50, effectType: 'item', effectValue: 'hint', desc: '高亮一对可消除图', icon: 'prop_hint', name_en: 'Hint x1', desc_en: 'Highlight a matchable pair' },
-  { itemId: 'prop_shuffle', name: '洗牌 x1', category: 'prop', price: 100, effectType: 'item', effectValue: 'shuffle', desc: '重排剩余方块', icon: 'prop_shuffle', name_en: 'Shuffle x1', desc_en: 'Reshuffle remaining tiles' },
-  { itemId: 'prop_bomb', name: '炸弹 x1', category: 'prop', price: 120, effectType: 'item', effectValue: 'bomb', desc: '消除 3×3 范围', icon: 'prop_bomb', name_en: 'Bomb x1', desc_en: 'Clear a 3x3 area' },
-  { itemId: 'prop_time', name: '加时 x1', category: 'prop', price: 80, effectType: 'item', effectValue: 'time', desc: '时间 +30 秒', icon: 'prop_time', name_en: '+Time x1', desc_en: 'Time +30s' }
+  // 闯关道具（显示名全局统一，不带 x1 数量后缀）
+  { itemId: 'prop_hint', name: '提示', category: 'prop', price: 50, effectType: 'item', effectValue: 'hint', desc: '高亮一对可消除图', icon: 'prop_hint', name_en: 'Hint', desc_en: 'Highlight a matchable pair' },
+  { itemId: 'prop_shuffle', name: '洗牌', category: 'prop', price: 100, effectType: 'item', effectValue: 'shuffle', desc: '洗牌剩余方块', icon: 'prop_shuffle', name_en: 'Shuffle', desc_en: 'Reshuffle remaining tiles' },
+  { itemId: 'prop_bomb', name: '炸弹', category: 'prop', price: 120, effectType: 'item', effectValue: 'bomb', desc: '炸掉 3×3 范围', icon: 'prop_bomb', name_en: 'Bomb', desc_en: 'Clear a 3x3 area' },
+  { itemId: 'prop_time', name: '加时', category: 'prop', price: 80, effectType: 'item', effectValue: 'time', desc: '时间 +30 秒', icon: 'prop_time', name_en: '+Time', desc_en: 'Time +30s' }
 ];
 
 var CATEGORIES = [
@@ -55,8 +55,14 @@ function nameOf(it) { return (lang() === 'en' && it.name_en) ? it.name_en : it.n
 function descOf(it) { return (lang() === 'en' && it.desc_en) ? it.desc_en : it.desc; }
 function catName(c) { return (lang() === 'en' && c.name_en) ? c.name_en : c.name; }
 
+/** 4 种闯关道具的唯一键表（存档 / 逻辑 / UI 共用） */
+var PROP_KEYS = ['hint', 'shuffle', 'bomb', 'time'];
+function propItem(key) { return PROP_KEYS.indexOf(key) >= 0 ? byId('prop_' + key) : null; }
+function propPrice(key) { var it = propItem(key); return it ? it.price : 0; }
+
 module.exports = {
   SHOP_ITEMS: SHOP_ITEMS, CATEGORIES: CATEGORIES,
   byId: byId, byCategory: byCategory,
+  PROP_KEYS: PROP_KEYS, propItem: propItem, propPrice: propPrice,
   nameOf: nameOf, descOf: descOf, catName: catName
 };

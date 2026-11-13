@@ -102,8 +102,7 @@ Home2.prototype.onShow = function () {
   this.earT = -1; this.earSide = 0; this.nextEar = 4.0;
   this.meowT = -1; this.nextMeow = 6.5;
   this.happyT = -1;
-  var daily = Save.checkDaily();
-  if (daily > 0) this.engine.toast(I.t('dailyReward', { n: daily }));
+  // 每日奖励由入口 game.js 统一发放并弹窗，主页不再单独发币 / 弹 toast
 };
 
 Home2.prototype.update = function (dt) {
@@ -590,7 +589,7 @@ Home2.prototype.onTouchUp = function (x, y) {
         break;
       }
       case 'gift': this.engine.goto('task'); break;
-      case 'play': this.engine.goto('play', { level: Save.get('maxLevel') }); break;
+      case 'play': this.engine.goto('select'); break;
       case 'shop': this.engine.goto('shop'); break;
       case 'hosp': this.engine.goto('hospital'); break;
       case 'room': this.engine.goto('cats'); break;

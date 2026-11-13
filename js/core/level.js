@@ -73,7 +73,7 @@ function levelConfig(id) {
   cfg.specials = specials;
   cfg.timeLimit = timeLimit;   // 0 表示不限时
   cfg.stepLimit = stepLimit;   // 0 表示不限步数
-  cfg.items = { hint: 1, shuffle: 1, bomb: 1, time: 1 }; // 每关赠送
+  // 道具数量由账号级存档背包提供，关卡配置不再每关发放
   return cfg;
 }
 
