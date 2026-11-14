@@ -10,15 +10,15 @@
 | `js/core/` 全部玩法逻辑（关卡、连线、死局、道具、存档、结算） | 像素 / 视觉效果（假 Canvas 只吞绘制调用，不产生画面） |
 | 9 个场景的 `update()` / `render()` 全链路不抛脚本错误 | 真机兼容性（基础库版本、触摸实测、性能） |
 | 触摸事件从 wx 回调到场景命中判定的完整链路 | 真实图片解码（图片是同步模拟"加载成功"或"失败"） |
-| 9 个场景全部命中区的逐个点击矩阵与选关 / 商城 / 设置面板定向交互 | 分包下载的真实网络过程（`loadSubpackage` 直接成功） |
+| 9 个场景全部命中区的逐个点击矩阵（每次点击都校验输入链路与引擎状态）与选关 / 商城 / 设置面板定向交互 | 分包下载的真实网络过程与弱网重试（fail 分支已由脚本用例覆盖） |
 | 1..300 关配置与棋盘生成的全量扫描，5 个阶段全部边界关自动通关 | 浏览器预览页分支（本套环境走 wx 分支） |
 | 含冰块 / 翻面 / 锁链按**真实规则**的完整通关（`自动通关: 真实规则` 与「不清标志」脚本用例），以及 4 种道具的按钮、失败分支、落盘与背包规范化 | 玩家实际操作手感 |
 | 局内流程：暂停 / 商店 / 购买 / 胜负弹窗按钮 / 移动元素换位 / 重玩不发奖 | 音频输出（未注入 `createWebAudioContext`，音效降级为 no-op） |
 | 每日奖励弹窗、跨天判重、任务领取与重置、猫咪养成、存档经济、医院治疗 | 部分纯绘制分支（立绘、装饰、温馨小屋动画） |
-| 图片失败重试链（400/800/1200ms）按虚拟时钟执行与资源恢复、字典 ↔ `state()` 契约自检、窄屏尺寸 / 自定义起始时间 / 场景栈压入 | 分包下载失败、`onTouchMove/Cancel`、浏览器预览分支 |
+| 图片失败重试链按虚拟时钟执行与资源恢复、`onTouchMove/Cancel`、`wx.onError` / `onUnhandledRejection`、分包 `loadSubpackage` fail 分支、字典 ↔ `state()` 契约自检、窄屏 / 自定义起始时间 / 场景栈压入 | 分包真实下载与弱网、`wx.onHide`（无业务注册）、浏览器预览分支 |
 | 固定 seed / 时钟下的确定性重放与操作序列回放 | — |
 
-一句话：**行为级无界面测试，不是视觉级**。
+一句话：**行为级无界面测试，不是视觉级**。不能自动判定的项目统一列在第 11 节「人工测试清单」。
 
 ## 2. 环境要求
 
@@ -42,14 +42,15 @@ $NPM  = 'C:\Users\XYHUOYU\.workbuddy\binaries\node\versions\22.22.2-6\npm.cmd'
 
 ```bash
 npm install           # 首次运行，安装 js-yaml
-npm test              # 全部 64 个用例（46 个脚本 + 17 个 YAML 声明式 + 1 个契约自检）
+npm test              # 全部 67 个用例（49 个脚本 + 17 个 YAML 声明式 + 1 个契约自检）
 npm run test:report   # 同上，并把结果落盘到 test/results/（见 3.1）
 npm run coverage      # 同上，并输出排除 test/ 后的覆盖率表（见 9）
+npm run coverage:gate # 同上，并启用 85/73/82 的行/分支/函数下限（CI 门禁，见 9）
 npm run catlink       # 只跑连连看：core + play + items（27）
 npm run catlink:core  # 连连看核心逻辑 + 全关卡扫描（9）
 npm run catlink:play  # 自动通关与局内流程（13）
 npm run catlink:items # 道具全分支（5）
-npm run engine:smoke  # 引擎级冒烟（8）
+npm run engine:smoke  # 引擎级冒烟（11）
 npm run ui:scenes     # 场景交互矩阵（5）
 npm run meta:economy  # 每日奖励 / 养成 / 经济（6）
 npm run cases         # 声明式层（18）：17 个 YAML 用例 + 1 个契约自检
@@ -77,7 +78,7 @@ node test/harness.js --scene=play --level=5 --seed=42 --frames=60 --board
 npm run test:report
 ```
 
-**每次运行生成一份独立报告，历史不会被覆盖**（默认只保留最近 50 份，见下）。文件名是运行时的本地时间戳，例如 `test/results/2026-11-14_12-49-35-917.xml`；万一同一毫秒内重复运行，会自动追加序号。终端仍同步输出 spec 可读结果（用例名、耗时、`pass 64 / fail 0` 摘要），退出码与 `npm test` 一致（有失败为 `1`）。
+**每次运行生成一份独立报告，历史不会被覆盖**（默认只保留最近 50 份，见下）。文件名是运行时的本地时间戳，例如 `test/results/2026-11-14_12-49-35-917.xml`；万一同一毫秒内重复运行，会自动追加序号。终端仍同步输出 spec 可读结果（用例名、耗时、`pass 67 / fail 0` 摘要），退出码与 `npm test` 一致（有失败为 `1`）。
 
 | 位置 | 内容 |
 | --- | --- |
@@ -95,11 +96,11 @@ npm run test:report
 | 层 | 入口 | 做法 |
 | --- | --- | --- |
 | L1 逻辑层 | `catlink.core.test.js`(9) | 零 mock，直接构造 `Grid` / `Game` / `Save`；对 1..300 关做配置与棋盘全量扫描 |
-| L2 引擎层 | `engine.smoke.test.js`(8) | 全局注入替身 → 原样 `require('game.js')` → 手动逐帧 / 逐触摸驱动 |
+| L2 引擎层 | `engine.smoke.test.js`(11) | 全局注入替身 → 原样 `require('game.js')` → 手动逐帧 / 逐触摸驱动 |
 | L3 玩法与业务流 | `catlink.play.test.js`(13)、`catlink.items.test.js`(5)、`meta.economy.test.js`(6)、`ui.scenes.test.js`(5) | 每轮用 `findAnyPair()` 找一对，反算像素坐标后真实点击；弹窗、养成、场景按钮全部由触摸驱动 |
 | 声明式层 | `cases/*.yaml`(17) + `_fields.yaml` + `runner.js` + `specs.test.js` | 用例只写「初始条件 / 步骤 / 期望」，别名在字典里，执行器用注册表翻译；另有 1 个契约自检用例 |
 
-6 个 `*.test.js` 是**脚本式用例**（46 个），适合需要 stub 内部方法、监听事件、构造复杂夹具的场合；`cases/*.yaml` 是**声明式用例**（17 个），适合常规回归；`specs.test.js` 是注册层 + 1 个「字典 ↔ `state()`」契约自检用例。三者共用同一套 `env.js` + `harness.js`。文件命名规则见第 10 节。
+6 个 `*.test.js` 是**脚本式用例**（49 个），适合需要 stub 内部方法、监听事件、构造复杂夹具的场合；`cases/*.yaml` 是**声明式用例**（17 个），适合常规回归；`specs.test.js` 是注册层 + 1 个「字典 ↔ `state()`」契约自检用例。三者共用同一套 `env.js` + `harness.js`。文件命名规则见第 10 节。
 
 > **用例数 ≠ 覆盖度**：17 个 YAML 用例里约 13 个是脚本用例的声明式重写，用于自举验证执行器、降低后续编写成本，属于**双份维护**而非新增覆盖；基线变更时两边都要改。真正带来增量的是 4 个：缺图重试链、窄屏 320×480 布局与点击、自定义起始时间的每日奖励、压入场景后的场景栈行为；脚本层的增量是图片重试恢复与字典契约自检。这 13 个自举用例是既有回归资产，暂不删除。
 
@@ -215,11 +216,12 @@ npm run test:report
 | `dpr` | `2` | 像素比 |
 | `safeTop` | `0` | 顶部安全区 |
 | `imageFail` | `false` | 所有图片加载失败，验证兜底渲染 |
+| `subpackageFail` | `false` | `wx.loadSubpackage` 改走 `fail` 回调，覆盖分包下载失败路径；仅脚本接口可用 |
 | `quiet` | `true` | 接管并收集 console 输出，不打印 |
 | `skipDailyGift` | `true` | 预置当日已领奖，避免启动时两个每日奖励弹窗 |
 | `imageWidth` / `imageHeight` | `64` / `64` | 假图片尺寸 |
 
-> `quiet` / `imageWidth` / `imageHeight` 只在脚本接口可用；`dpr` / `safeTop` 已由 `--dpr` / `--safeTop` 暴露。所有实际生效值都会出现在 CLI 输出的 `boot` 字段里。
+> `quiet` / `imageWidth` / `imageHeight` / `subpackageFail` 只在脚本接口可用；`dpr` / `safeTop` 已由 `--dpr` / `--safeTop` 暴露。CLI 实际生效值都会出现在输出的 `boot` 字段里。
 
 ### 5.2 `Harness` 方法
 
@@ -285,7 +287,7 @@ console.log(JSON.stringify(snapshot, null, 2));
 ## 7. AI 自测推荐流程
 
 1. **准备**：首次 `npm install`（装 `js-yaml`）。
-2. **回归**：`npm test`（约 0.7s，64 个用例）；只想验某一块时用 `npm run catlink` / `catlink:core` / `catlink:play` / `catlink:items` / `engine:smoke` / `ui:scenes` / `meta:economy` / `cases`。需要把结果存成文件时用 `npm run test:report`（见 3.1），需要覆盖率时用 `npm run coverage`（见 9）。
+2. **回归**：`npm test`（约 0.8s，67 个用例）；只想验某一块时用 `npm run catlink` / `catlink:core` / `catlink:play` / `catlink:items` / `engine:smoke` / `ui:scenes` / `meta:economy` / `cases`。需要把结果存成文件时用 `npm run test:report`（见 3.1），需要覆盖率时用 `npm run coverage`，CI 的阈值门禁是 `npm run coverage:gate`（见 9）。
 3. **定位**：用探针拿 JSON 快照，例如 `--scene=play --level=61 --board`，读 `error` / `consoleErrors` / `play` / `board.pair`。
 4. **固定现场**：探针输出的 `boot`（含 seed / now / 尺寸 / dpr / safeTop / imageFail / skipDailyGift）加 `actions` 就是完整复现输入，失败时按 `boot` 里的值传参原样重跑。
 5. **自动驱动**：常规场景优先直接写 `test/cases/*.yaml`（见 4.5）；脚本里也可以用 `h.board().pair` 找可消除的一对，`h.play().game.tapCell(r, c)` 按行列驱动，或 `_cx/_cy` 反算像素后 `h.tap(x, y)` 走真实触摸。
@@ -303,14 +305,14 @@ console.log(JSON.stringify(snapshot, null, 2));
 
 ## 9. 已知限制与后续扩展
 
-- 覆盖率基线用 `npm run coverage` 复现（Node 内置覆盖率，`--test-coverage-exclude=test/**`；Node 22.22.2 实测）：**约 85.8% 行 / 73.9% 分支 / 82.7% 函数**。不同 Node 版本与排除规则会有零点几个百分点差异，以本地输出为准。关键模块：`core/game.js` 97.52%、`scenes/play.js` 95.85%、`core/cats.js` 84.57%、`core/save.js` 97.22%、`core/tasks.js` 98.81%、`scenes/hospital.js` 与 `scenes/select.js` 100%。
+- 覆盖率基线用 `npm run coverage` 复现（Node 内置覆盖率，`--test-coverage-exclude=test/**`；Node 22.22.2 实测）：**约 85.9% 行 / 74.1% 分支 / 83.6% 函数**。不同 Node 版本与排除规则会有零点几个百分点差异，以本地输出为准。CI 用 `npm run coverage:gate` 启用 **85 / 73 / 82** 的行 / 分支 / 函数下限，低于阈值直接让流水线失败。关键模块：`core/game.js` 97.52%、`scenes/play.js` 95.85%、`core/cats.js` 84.57%、`core/save.js` 97.22%、`core/tasks.js` 98.81%、`scenes/hospital.js` 与 `scenes/select.js` 100%。
 - **覆盖率 ≠ 正确性**：绘制代码被执行只代表"没抛异常"，因为 canvas 是 noop，一个像素都没被验证。
 - 声明式配置的代价：表达力受限于注册表里的动作与操作符；失败堆栈指向执行器而非 YAML 行，需要靠 `名称` 定位；无法表达 stub / 事件监听 / 时序断言。这正是保留脚本用例的原因。
-- 仍未覆盖：浏览器预览分支（`adapter.js:25-31`、`:153-157`，`render.js:616-628`）、`__FORCE_SIZE` / `__RIG_TIME` / `__RIG_POSE` 等预览钩子、`ui/catRig.js` / `ui/cozy.js` 等纯绘制分支、`home2.js` 装饰动画、`catroom.js` 抚摸 / 换装分支、`wx.loadSubpackage` 的 fail 分支、`onTouchMove/Cancel`、`wx.onError/onHide`，以及视觉、真机兼容、性能、音频、分包真实下载。
+- 仍未覆盖：浏览器预览分支（`adapter.js:25-31`、`:153-157`，`render.js:616-628`）、`__FORCE_SIZE` / `__RIG_TIME` / `__RIG_POSE` 等预览钩子、`ui/catRig.js` / `ui/cozy.js` 等纯绘制分支、`home2.js` 装饰动画、`catroom.js` 抚摸 / 换装分支、`wx.onHide`（源码未注册业务回调）、真机弱网下的分包重试，以及视觉、真机兼容、性能、音频、真实图片解码。`loadSubpackage` 的 fail 分支、`onTouchMove/Cancel`、`wx.onError` / `onUnhandledRejection` 已由脚本用例覆盖。其中**必须人工判定**的部分见第 11 节，**可补自动化**的部分不要混进人工清单。
 - 测试环境是「wx 平台 API + 浏览器式 `window`」的混合体（见 4.2）：真机上不存在的 `window` 分支在这里会走到，涉及真机专属行为的问题仍需人工 / 真机验证。
 - 假 Canvas 不做像素断言，图片也不读真实 PNG。要做视觉回归，可另建静态预览页 + Playwright 截图对比；项目里已有的 `window.__FORCE_SIZE`、`__RIG_TIME`、`__RIG_POSE` 钩子正是为此准备的。
 - 依赖只有 `js-yaml`（`devDependencies`），且只用于测试期；`node_modules/`、`package.json`、`package-lock.json`、`test/`、`docs/`、`README.md` 都由 `project.config.json` 的 `packOptions.ignore` 排除，不会打进小游戏包体。
-- CI 已接入 `.github/workflows/test.yml`：push / PR / 手动触发，`npm ci` → `npm run test:report`（退出码即门禁）→ `npm run coverage`；固定 `TZ=Asia/Shanghai` 让跨天用例稳定，JUnit XML 上传为 artifact（保留 14 天）。
+- CI 已接入 `.github/workflows/test.yml`：push / PR / 手动触发，`npm ci` → `npm run test:report`（退出码即门禁）→ `npm run coverage:gate`（85/73/82 覆盖率下限，见上）；固定 `TZ=Asia/Shanghai` 让跨天用例稳定，JUnit XML 上传为 artifact（保留 14 天）。
 
 ## 10. 命名规范与文件清单
 
@@ -344,7 +346,7 @@ test/cases/<功能域>.<主题>.yaml   声明式用例
 
 | 文件 | 类型 | 作用 |
 | --- | --- | --- |
-| `test/env.js` | 基建 | 假运行时：wx / Canvas / Image / 按虚拟时钟驱动的定时器 / 时钟 / 随机种子 |
+| `test/env.js` | 基建 | 假运行时：wx（含 `subpackageFail` 开关）/ Canvas / Image / 按虚拟时钟驱动的定时器 / 时钟 / 随机种子 |
 | `test/harness.js` | 基建 + CLI | 启动、逐帧与触摸驱动、状态快照、操作回放、命令行探针（含 `boot` 复现参数） |
 | `test/runner.js` | 基建 | YAML 用例执行器：动作注册表、断言注册表、通用 `runCase()`、期望字段校验 |
 | `test/report.js` | 基建 | 每次运行生成一份带时间戳的独立 JUnit 报告，不覆盖历史、默认保留最近 50 份（见 3.1） |
@@ -356,12 +358,75 @@ test/cases/<功能域>.<主题>.yaml   声明式用例
 | `test/catlink.core.test.js` | 用例（脚本） | 9 个：7 个逻辑层单测 + 2 个全关卡扫描 |
 | `test/catlink.play.test.js` | 用例（脚本） | 13 个：6 个自动通关 + 7 个局内流程与弹窗 |
 | `test/catlink.items.test.js` | 用例（脚本） | 5 个道具全分支 |
-| `test/engine.smoke.test.js` | 用例（脚本） | 8 个引擎级无界面冒烟（含图片失败重试恢复） |
-| `test/ui.scenes.test.js` | 用例（脚本） | 5 个场景交互矩阵 |
+| `test/engine.smoke.test.js` | 用例（脚本） | 11 个引擎级无界面冒烟（含图片重试、触摸 Move/Cancel、全局错误回调、分包失败） |
+| `test/ui.scenes.test.js` | 用例（脚本） | 5 个场景交互矩阵；命中区逐个点击并校验输入链路与引擎状态 |
 | `test/meta.economy.test.js` | 用例（脚本） | 6 个每日奖励 / 养成 / 经济 |
 | `test/results/` | **结果（gitignore）** | 每次运行一份 `<时间戳>.xml`，历史不覆盖、不入库、不打包，默认保留最近 50 份（见 3.1） |
-| `package.json` / `package-lock.json` | 配置 | `devDependencies: js-yaml`、`engines.node`、`test` / `test:report` / `coverage` 及按功能域划分的分组脚本 |
+| `package.json` / `package-lock.json` | 配置 | `devDependencies: js-yaml`、`engines.node`、`test` / `test:report` / `coverage` / `coverage:gate` 及按功能域划分的分组脚本 |
 | `.gitignore` | 配置 | 排除 `test/results/`、个人配置、素材原图等 |
 | `project.config.json` | 配置 | `packOptions.ignore` 排除测试目录、npm 文件、`docs/`、`README.md`，均不进小游戏包体 |
-| `.github/workflows/test.yml` | **CI** | GitHub Actions：`npm ci` → `npm run test:report` → `npm run coverage`，固定 TZ、上传 JUnit artifact |
+| `.github/workflows/test.yml` | **CI** | GitHub Actions：`npm ci` → `npm run test:report` → `npm run coverage:gate`（85/73/82 下限），固定 TZ、上传 JUnit artifact |
 | `README.md` | 文档 | 项目简介与本文档链接 |
+
+## 11. 人工测试清单（发布前必测）
+
+下列项目**无法由本套无界面测试判定通过**：假 Canvas 不产生像素、假 `wx` 不触发真实平台行为、虚拟时钟不代表真机时间。`npm test` 全绿只说明玩法逻辑与脚本链路没有回归，不等于可以发布。建议每次发布前逐项打勾。
+
+### 11.1 视觉与排版
+
+> 依据：假 2D context 的所有绘制方法都是 no-op，`measureText` 返回估算宽度，`getImageData` 返回全 0；`ui/nestArt.js` 这类模块的分支覆盖率只有 28.79%，且「执行过」不等于「画对了」。
+
+- [ ] 9 个场景静态画面：文字截断 / 重叠、字体与字号、按钮与面板层级、渐变 / 圆角 / 阴影
+- [ ] 粒子、飘字、抖动、toast、错误浮层等瞬时效果
+- [ ] 25 张品种立绘与 `ui/catRig.js` 姿态动画、`ui/nestArt.js` 咪窝分层素材、`home2` 温馨小屋动画
+- [ ] 结算 / 暂停 / 每日奖励弹窗的遮罩、层级与点击穿透
+- [ ] 中英文切换后的排版（`js/core/i18n.js` 词条存在 ≠ 排版正确，英文更长易溢出）
+- [ ] 缺图兜底画面：`--imageFail` 只保证不崩，不保证兜底图好看
+
+### 11.2 真机与设备
+
+> 依据：假 `getSystemInfoSync` 固定返回 375×667 / dpr=2 / safeTop=0；`harness.touch()` 只驱动 down/up，`onTouchMove/Cancel` 虽有脚本用例触发，但只校验「不多计点击、不抛异常」，没有真机手势语义；虚拟时钟不代表真实耗时。
+
+- [ ] iOS 与 Android 各至少一台，覆盖最低与最新微信基础库版本
+- [ ] 刘海屏 / 灵动岛、不同 `safeArea` 与 `dpr`、小屏 / 大屏、系统字体放大
+- [ ] 真实触摸：连点、长按、滑动、多点、误触、响应延迟；重点试 `onTouchMove` / `onTouchCancel` 的实际手势与取消语义（脚本只覆盖了回调不崩）
+- [ ] 帧率与发热、30 分钟以上挂机、内存 / 显存增长、切后台再回前台
+
+### 11.3 平台 API、资源与生命周期
+
+> 依据：假 `Image` 同步触发 `onload` 且不读 PNG；`createWebAudioContext` 未注入；`wx.onHide` 在源码里没有业务注册；`loadSubpackage` 的 fail 分支与 `wx.onError` 已由脚本用例触发，但那只是内存里的回调，不等于真实网络 / 解码 / 系统回调；存储是内存 Map。
+
+- [ ] 真实图片解码：68 张预加载图、雪碧图帧索引、中文 / 相对路径的多路径兜底（`adapter.encodePath`）、分包内 nest / breeds 素材
+- [ ] 分包下载：首次进入 `home2` / `cats` 的下载过程、弱网 / 断网、下载中退出与失败提示（`loadSubpackage` fail 的业务兜底已有脚本用例，真机网络仍需人工）
+- [ ] 音频：`A.sfx` / `A.beep` 在真机 `createWebAudioContext` 下是否发声、静音键与后台切换、频繁播放是否卡顿（测试里是 no-op）
+- [ ] 存档：真实 `wx.setStorageSync` 配额、旧版本存档迁移（`Save._migrate`）、存储被清理后的恢复
+- [ ] 生命周期：`onShow` 跨天补发（真机系统时间 / 时区 / 手动改日期）、`onHide`、`onError` / `onUnhandledRejection` 的错误浮层、`setKeepScreenOn`
+- [ ] 胶囊按钮：真实 `getMenuButtonBoundingClientRect` 与右上角区域遮挡（假 wx 返回固定值）
+
+### 11.4 浏览器预览分支（若保留预览页）
+
+> 依据：测试定义了全局 `wx`，`isWx === true`，以下代码一行都没执行。
+
+- [ ] `adapter.js:25-31` 的 `document.getElementById('game')` / `__FORCE_SIZE` / `__SAFE_TOP`
+- [ ] `render.js:616-628` 的鼠标事件绑定、`adapter.js:153-157` 的 `new Image()`、`focus` / `blur` 生命周期
+- [ ] `__RIG_TIME` / `__RIG_POSE` 摆拍钩子在预览页的表现
+
+### 11.5 手感与产品验收
+
+> 依据：`1..300 关全量扫描`只保证配置合法与开局有解；命中区矩阵只保证「点了不抛异常」。
+
+- [ ] 连线路径高亮、消除反馈、连击提示、倒计时与步数耗尽的节奏
+- [ ] 4 种道具的使用反馈、购买确认与货币变化是否可感知
+- [ ] 猫咪喂食 / 抚摸 / 换装 / 领养、任务领取的正反馈
+- [ ] 难度曲线与阶段边界（10 / 30 / 45 / 60 / 100 关）的实际体验
+- [ ] 可读性：对比度、字号、色盲友好
+
+### 11.6 发布与集成
+
+- [ ] 微信开发者工具真机预览与上传、主包 / 分包体积限制、`packOptions.ignore` 是否真的排除了 `test/` 与 `docs/`
+- [ ] AppID、基础库版本、域名与隐私配置
+- [ ] 确认 GitHub Actions 的 `headless-tests` 绿灯只代表逻辑回归，不作为发布唯一依据
+
+**判定口径**：CI 绿灯 = 玩法逻辑与脚本链路无回归；本清单未逐项打勾，不应仅凭 CI 绿灯发布。
+
+**别把「待补自动化」混进人工清单**：上一版列为欠账的 `onTouchMove/Cancel`、`wx.onError` / `onUnhandledRejection`、`loadSubpackage` fail 分支已通过 `test/env.js` 的触发开关变成脚本用例；剩余可补自动化的是 `wx.onHide`（源码目前未注册业务回调）、真实 PNG 解码的多路径兜底、弱网重试的时序断言。真正必须人工的是像素、真机平台行为、操作手感与发布流程。视觉部分若要自动化，另建静态预览页 + Playwright 截图对比（用 `__FORCE_SIZE` / `__RIG_TIME` / `__RIG_POSE` 冻结状态），不要塞进 `test/cases/*.yaml` 假装已测。

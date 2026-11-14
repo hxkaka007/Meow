@@ -114,6 +114,7 @@ function installEnv(opts) {
     raf: null,
     timers: [],
     imageFail: !!opts.imageFail,
+    subpackageFail: !!opts.subpackageFail,
     seed: opts.seed === undefined ? 20260101 : opts.seed,
     width: opts.width || 375,
     height: opts.height || 667,
@@ -178,7 +179,11 @@ function installEnv(opts) {
     onUnhandledRejection: function (fn) { env.handlers.onUnhandledRejection = fn; },
     setKeepScreenOn: noop,
     exitMiniProgram: noop,
-    loadSubpackage: function (o) { if (o && o.success) o.success(); }
+    // subpackageFail 打开时走 fail 分支，用于覆盖分包下载失败路径
+    loadSubpackage: function (o) {
+      if (env.subpackageFail) { if (o && o.fail) o.fail({ errMsg: 'loadSubpackage:fail (test)' }); }
+      else if (o && o.success) o.success();
+    }
   };
   global.Image = function () { return makeImage(env, opts); };
 

@@ -31,9 +31,9 @@ jobs:
       - name: Run headless tests (spec + JUnit)
         run: npm run test:report
 
-      - name: Coverage
+      - name: Coverage gate
         if: success()
-        run: npm run coverage
+        run: npm run coverage:gate
 
       - name: Upload JUnit report
         if: always()

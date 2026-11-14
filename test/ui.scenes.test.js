@@ -61,9 +61,12 @@ test('9 个场景的所有命中区逐个点击都不产生脚本异常', functi
         h.env.errors.length = 0;
         h.engine._lastError = null;
         enter(h, name);
+        var tapsBefore = h.state().tapCount;
         tapRect(h, b);
         h.step(1);
         var s = h.state();
+        assert.equal(s.tapCount, tapsBefore + 1, name + ' / ' + b.label + ' 点击应被触摸回调接收');
+        assert.ok(s.scene && s.stack.length > 0, name + ' / ' + b.label + ' 点击后引擎状态应仍合法');
         assert.equal(s.error, null, name + ' / ' + b.label + ' 出现脚本错误');
         assert.equal(s.consoleErrors.length, 0, name + ' / ' + b.label + ' 出现 console.error');
         total++;

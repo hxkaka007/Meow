@@ -132,3 +132,45 @@ test('图片失败重试按虚拟时钟执行，资源恢复后写回图片缓�
     h.assertNoError();
   });
 });
+
+test('onTouchMove / onTouchCancel 回调不产生多余点击也不抛异常', function () {
+  withHarness({ seed: 42 }, function (h) {
+    h.closeModals();
+    h.step(1);
+    assert.equal(typeof h.env.handlers.touchMove, 'function', '应注册 onTouchMove');
+    assert.equal(typeof h.env.handlers.touchCancel, 'function', '应注册 onTouchCancel');
+    var before = h.state().tapCount;
+    var pt = { clientX: 8, clientY: 8 };
+    h.env.handlers.touchMove({ touches: [pt], changedTouches: [pt] });
+    h.env.handlers.touchCancel({ touches: [], changedTouches: [pt] });
+    h.step(1);
+    assert.equal(h.state().tapCount, before, 'Move / Cancel 不应计入点击');
+    h.assertNoError();
+  });
+});
+
+test('wx.onError / onUnhandledRejection 会写入引擎错误状态', function () {
+  withHarness({}, function (h) {
+    assert.equal(typeof h.env.handlers.onError, 'function');
+    assert.equal(typeof h.env.handlers.onUnhandledRejection, 'function');
+    h.env.handlers.onError('模拟 wx.onError');
+    assert.equal(h.state().error, '模拟 wx.onError');
+    h.engine._lastError = null;
+    h.env.handlers.onUnhandledRejection({ reason: { message: '模拟 Promise 异常' } });
+    assert.equal(h.state().error, '模拟 Promise 异常');
+  });
+});
+
+test('分包下载失败时场景仍可渲染且留下告警', function () {
+  withHarness({ seed: 42, subpackageFail: true }, function (h) {
+    h.push('home2');
+    h.step(5);
+    var s = h.state();
+    assert.equal(s.error, null);
+    assert.equal(s.consoleErrors.length, 0);
+    assert.ok(h.env.logs.some(function (l) {
+      return l.level === 'warn' && String(l.msg).indexOf('[subpkg]') >= 0;
+    }), '分包失败应留下 warn 日志');
+    h.assertNoError();
+  });
+});
