@@ -16,9 +16,7 @@
 
 ## 无界面自测（AI / CI）
 
-Node 18+ 即可在假 `wx` / 假 Canvas 环境中驱动完整游戏，无需微信开发者工具或浏览器。首次运行 `npm install`，之后 `npm test`。
-
-脚本入口、声明式 YAML 用例、测试文件命名规范与实现原理见 [headless-testing.md](docs/headless-testing.md)。
+详见 [headless-testing.md](docs/headless-testing.md)。
 
 ## 玩法文档
 

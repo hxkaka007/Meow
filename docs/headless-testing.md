@@ -12,16 +12,18 @@
 | 触摸事件从 wx 回调到场景命中判定的完整链路 | 真实图片解码（图片是同步模拟"加载成功"或"失败"） |
 | 9 个场景全部命中区的逐个点击矩阵与选关 / 商城 / 设置面板定向交互 | 分包下载的真实网络过程（`loadSubpackage` 直接成功） |
 | 1..300 关配置与棋盘生成的全量扫描，5 个阶段全部边界关自动通关 | 浏览器预览页分支（本套环境走 wx 分支） |
-| 含冰块 / 翻面 / 锁链的完整通关，以及 4 种道具的按钮、失败分支、落盘与背包规范化 | 玩家实际操作手感 |
+| 含冰块 / 翻面 / 锁链按**真实规则**的完整通关（`自动通关: 真实规则` 与「不清标志」脚本用例），以及 4 种道具的按钮、失败分支、落盘与背包规范化 | 玩家实际操作手感 |
 | 局内流程：暂停 / 商店 / 购买 / 胜负弹窗按钮 / 移动元素换位 / 重玩不发奖 | 音频输出（未注入 `createWebAudioContext`，音效降级为 no-op） |
 | 每日奖励弹窗、跨天判重、任务领取与重置、猫咪养成、存档经济、医院治疗 | 部分纯绘制分支（立绘、装饰、温馨小屋动画） |
+| 图片失败重试链（400/800/1200ms）按虚拟时钟执行与资源恢复、字典 ↔ `state()` 契约自检、窄屏尺寸 / 自定义起始时间 / 场景栈压入 | 分包下载失败、`onTouchMove/Cancel`、浏览器预览分支 |
 | 固定 seed / 时钟下的确定性重放与操作序列回放 | — |
 
 一句话：**行为级无界面测试，不是视觉级**。
 
 ## 2. 环境要求
 
-- Node **18+**，测试期依赖一个包：`js-yaml`（解析 YAML 用例）。首次运行需 `npm install`。
+- Node **18+**（`package.json` 的 `engines` 已声明），测试期依赖一个包：`js-yaml`（在 `devDependencies`，只用于解析 YAML 用例）。首次运行需 `npm install`，CI 用 `npm ci`。
+- CI 已接入 `.github/workflows/test.yml`（GitHub Actions，Node 22），详见第 9 节。
 - 游戏源码和微信小游戏包体不依赖这些 npm 包；`node_modules/`、`package.json`、`package-lock.json`、`test/` 都已由 `project.config.json` 的 `packOptions.ignore` 排除。
 
 本机 Windows 的 `node` / `npm` 不在 PATH，可直接使用已有二进制：
@@ -40,16 +42,17 @@ $NPM  = 'C:\Users\XYHUOYU\.workbuddy\binaries\node\versions\22.22.2-6\npm.cmd'
 
 ```bash
 npm install           # 首次运行，安装 js-yaml
-npm test              # 全部 58 个用例（45 个脚本 + 13 个 YAML 声明式用例）
+npm test              # 全部 64 个用例（46 个脚本 + 17 个 YAML 声明式 + 1 个契约自检）
 npm run test:report   # 同上，并把结果落盘到 test/results/（见 3.1）
+npm run coverage      # 同上，并输出排除 test/ 后的覆盖率表（见 9）
 npm run catlink       # 只跑连连看：core + play + items（27）
 npm run catlink:core  # 连连看核心逻辑 + 全关卡扫描（9）
 npm run catlink:play  # 自动通关与局内流程（13）
 npm run catlink:items # 道具全分支（5）
-npm run engine:smoke  # 引擎级冒烟（7）
+npm run engine:smoke  # 引擎级冒烟（8）
 npm run ui:scenes     # 场景交互矩阵（5）
 npm run meta:economy  # 每日奖励 / 养成 / 经济（6）
-npm run cases         # 只跑声明式用例（13），内容在 test/cases/*.yaml
+npm run cases         # 声明式层（18）：17 个 YAML 用例 + 1 个契约自检
 npm run probe:play    # 单场景探针：play / level 1 / 60 帧
 npm run probe         # 默认探针：启动后渲染 1 帧
 ```
@@ -62,7 +65,7 @@ npm run probe         # 默认探针：启动后渲染 1 帧
 node test/harness.js --scene=play --level=5 --seed=42 --frames=60 --board
 ```
 
-输出是**纯 JSON**，字段含义见 5.3。异常时 JSON 里多一个 `fatal` 字段，进程退出码为 `1`；正常为 `0`。`actions` 字段是本轮实际执行的操作序列，可直接保存下来复现。
+输出是**纯 JSON**，字段含义见 5.3；`boot` 字段记录本次实际生效的全部启动参数。**任何阶段**（含 `boot()` 启动失败）异常时 JSON 里多一个 `fatal` 字段，进程退出码为 `1`；正常为 `0`。`boot` + `actions`（本轮实际执行的操作序列）合起来才是完整复现输入。
 
 **新增常规回归用例优先用声明式配置**（见 4.5），不必再写脚本。
 
@@ -74,16 +77,16 @@ node test/harness.js --scene=play --level=5 --seed=42 --frames=60 --board
 npm run test:report
 ```
 
-**每次运行生成一份独立报告，历史不会被覆盖。** 文件名是运行时的本地时间戳，例如 `test/results/2026-11-14_12-49-35-917.xml`；万一同一毫秒内重复运行，会自动追加序号。终端仍同步输出 spec 可读结果（用例名、耗时、`pass 58 / fail 0` 摘要），退出码与 `npm test` 一致（有失败为 `1`）。
+**每次运行生成一份独立报告，历史不会被覆盖**（默认只保留最近 50 份，见下）。文件名是运行时的本地时间戳，例如 `test/results/2026-11-14_12-49-35-917.xml`；万一同一毫秒内重复运行，会自动追加序号。终端仍同步输出 spec 可读结果（用例名、耗时、`pass 64 / fail 0` 摘要），退出码与 `npm test` 一致（有失败为 `1`）。
 
 | 位置 | 内容 |
 | --- | --- |
 | `test/results/<时间戳>.xml` | 标准 JUnit XML：每个 `<testcase>` 的名称与耗时，失败时含 `<failure>` 详情，供 CI / IDE 测试面板导入 |
 | 终端 | 即时可读的 spec 输出，不落盘 |
 
-`test/report.js` 负责建目录、生成唯一文件名，并直接从 `package.json` 的 `scripts.test` 读取测试文件列表（不用两处维护）；落盘用 Node 内置多 reporter，无额外依赖。`test/results/` 已写入 `.gitignore`，历史报告不入库；`project.config.json` 忽略整个 `test/`，也不会打进小游戏包体。报告会一直累积，需要清理时手动删除该目录即可。
+`test/report.js` 负责建目录、生成唯一文件名，并直接从 `package.json` 的 `scripts.test` 读取测试文件列表（不用两处维护）；落盘用 Node 内置多 reporter，无额外依赖。`test/results/` 已写入 `.gitignore`，历史报告不入库；`project.config.json` 忽略整个 `test/`，也不会打进小游戏包体。默认只保留最近 **50** 份报告（超出时清理最老的），用 `TEST_REPORT_KEEP=0` 可关闭清理，或设成其它数量。
 
-> 覆盖率不在这个脚本里，仍按第 9 节的方式单独查看。
+> 覆盖率不在这个脚本里，跑 `npm run coverage`（见第 9 节）。
 
 ## 4. 方案与原理
 
@@ -92,21 +95,23 @@ npm run test:report
 | 层 | 入口 | 做法 |
 | --- | --- | --- |
 | L1 逻辑层 | `catlink.core.test.js`(9) | 零 mock，直接构造 `Grid` / `Game` / `Save`；对 1..300 关做配置与棋盘全量扫描 |
-| L2 引擎层 | `engine.smoke.test.js`(7) | 全局注入替身 → 原样 `require('game.js')` → 手动逐帧 / 逐触摸驱动 |
+| L2 引擎层 | `engine.smoke.test.js`(8) | 全局注入替身 → 原样 `require('game.js')` → 手动逐帧 / 逐触摸驱动 |
 | L3 玩法与业务流 | `catlink.play.test.js`(13)、`catlink.items.test.js`(5)、`meta.economy.test.js`(6)、`ui.scenes.test.js`(5) | 每轮用 `findAnyPair()` 找一对，反算像素坐标后真实点击；弹窗、养成、场景按钮全部由触摸驱动 |
-| 声明式层 | `cases/*.yaml`(13) + `_fields.yaml` + `runner.js` + `specs.test.js` | 用例只写「初始条件 / 步骤 / 期望」，别名在字典里，执行器用注册表翻译 |
+| 声明式层 | `cases/*.yaml`(17) + `_fields.yaml` + `runner.js` + `specs.test.js` | 用例只写「初始条件 / 步骤 / 期望」，别名在字典里，执行器用注册表翻译；另有 1 个契约自检用例 |
 
-6 个 `*.test.js` 是**脚本式用例**（45 个），适合需要 stub 内部方法、监听事件、构造复杂夹具的场合；`cases/*.yaml` 是**声明式用例**（13 个），适合常规回归；`specs.test.js` 只是注册层，自身没有用例内容。三者共用同一套 `env.js` + `harness.js`。文件命名规则见第 10 节。
+6 个 `*.test.js` 是**脚本式用例**（46 个），适合需要 stub 内部方法、监听事件、构造复杂夹具的场合；`cases/*.yaml` 是**声明式用例**（17 个），适合常规回归；`specs.test.js` 是注册层 + 1 个「字典 ↔ `state()`」契约自检用例。三者共用同一套 `env.js` + `harness.js`。文件命名规则见第 10 节。
+
+> **用例数 ≠ 覆盖度**：17 个 YAML 用例里约 13 个是脚本用例的声明式重写，用于自举验证执行器、降低后续编写成本，属于**双份维护**而非新增覆盖；基线变更时两边都要改。真正带来增量的是 4 个：缺图重试链、窄屏 320×480 布局与点击、自定义起始时间的每日奖励、压入场景后的场景栈行为；脚本层的增量是图片重试恢复与字典契约自检。这 13 个自举用例是既有回归资产，暂不删除。
 
 > 关卡号无上限（`docs/catlink.md` 明确没有静态关卡表），所以"每个关卡"用**全量配置 / 棋盘扫描 + 阶段边界关自动通关**覆盖，而不是逐关硬编码。
 
 ### 4.2 为什么可以不改游戏源码
 
-1. `js/adapter.js:4` 只用 `typeof wx !== 'undefined' && !!wx.getSystemInfoSync` 判断平台，且平台调用几乎全部收口在该文件。定义全局 `wx` 即让 `isWx === true`，避免它去找 `document` / `localStorage` / `AudioContext`。
+1. `js/adapter.js:4` 只用 `typeof wx !== 'undefined' && !!wx.getSystemInfoSync` 判断平台；存储 / 音效 / 图片加载 / 分包调用收口在该文件。定义全局 `wx` 即让 `isWx === true`，避免它去找 `document` / `localStorage` / `AudioContext`。**但平台调用并非全部收口**：`game.js:74-86`、`js/render.js:611-626`、`js/ui/catRig.js:37` 与若干 `scenes/*.js` 仍直接访问 `wx` / `window` / `document`，改动这些文件时要同步检查替身是否齐全。
 2. `js/core/` 是纯 ES5 CommonJS，不依赖 canvas / DOM / wx；`js/adapter.js:40-47`、`:60-63` 的 `try/catch` 还会把缺失环境下的存档与音效降级为 no-op。
-3. `game.js:74` 已有 `window.__engine = engine`。设 `global.window = globalThis`，句柄就落到 `globalThis.__engine`，测试无需新增任何导出即可拿到引擎。
+3. `game.js:74` 已有 `if (typeof window !== 'undefined') window.__engine = engine`。设 `global.window = globalThis`，句柄就落到 `globalThis.__engine`，测试无需新增任何导出即可拿到引擎。**这是浏览器预览分支的调试后门**：真机 wx 环境没有 `window`，该句柄并不存在。所以本套环境是「wx 平台 API + 浏览器式全局」的混合体，所有 `typeof window` 分支都会走与真机不同的路径；句柄一旦被移除或改名，整套基座立刻失效。
 
-> 唯一一处游戏源码改动：`js/scenes/catroom.js` 把高级食物的 `itemId` 从 `food_pudding`（其实是图标名）修正为 `food_milk`，否则 `Shop.byId()` 返回 `null` 会让喂食崩溃。该缺陷由 `ui.scenes.test.js` 的回归用例锁定。
+> 唯一一处**为修复玩法 bug** 的源码改动：`js/scenes/catroom.js` 把高级食物的 `itemId` 从 `food_pudding`（其实是图标名）修正为 `food_milk`，否则 `Shop.byId()` 返回 `null` 会让喂食崩溃。该缺陷由 `ui.scenes.test.js` 的回归用例锁定。源码里另有 `__FORCE_SIZE` / `__SAFE_TOP` / `__RIG_TIME` / `__RIG_POSE` 等预览 / 摆拍钩子，本套测试未使用，属于覆盖不到的死分支。
 
 ### 4.3 替身清单
 
@@ -116,8 +121,8 @@ npm run test:report
 | 假 2D context | `Proxy`：绘制方法返回 noop；渐变返回带 `addColorStop` 的对象；`measureText` 返回 `{width}`；`getImageData` 返回合法 `Uint8ClampedArray` | 渲染代码完整执行（能暴露异常），但不产生像素，无需 `node-canvas` 这类原生依赖 |
 | 假 `Image` | 给 `src` 赋值时**同步**触发 `onload`（`imageFail` 时触发 `onerror`） | `engine.preload()` 的 68 张图瞬间完成；也能模拟全部缺图时的兜底渲染 |
 | 假 `requestAnimationFrame` | 只保存回调、不自动调度，由 `step()` 用递增时间戳手动调用 | 帧数、\(dt\)、`Date.now()` 全由测试控制 |
-| 假定时器 | `setInterval` 同步把轮询跑完（`preload` 的 8 秒超时逻辑瞬间走完）；`setTimeout` 排队、按需 `flushTimers()` | 无挂起句柄、结果不依赖真实墙钟 |
-| 可控时钟 | `class FakeDate extends Date`，`Date.now()` 与 `new Date()` 都读 `clock.now`，`step()` 按帧推进 | 每日奖励判重、任务跨天、猫咪衰减全部可复现 |
+| 假定时器 | `setTimeout` / `setInterval` 只注册并记录到期时间，由 `step()` 按虚拟时钟触发；`clearInterval(id)` 按 id 生效；`boot()` 只排空启动期 `preload` 轮询且**不推进业务时钟**；`flushTimers()` 是「跳过等待、立即全跑」的显式逃生阀 | 图片失败 400/800/1200ms 重试链、`preload` 8 秒超时、`waitImages` 超时都按虚拟时间执行；回调异常写入 `env.errors`，会被 `assertNoError()` 捕获 |
+| 可控时钟 | `class FakeDate extends Date`，`Date.now()` 与 `new Date()` 都读 `clock.now`，`step()` 按帧推进；启动阶段不再被 `preload` 偷推（旧版 `imageFail` 会多推进 8 秒） | 每日奖励判重、任务跨天、猫咪衰减全部可复现 |
 | 种子随机 | mulberry32 替换全局 `Math.random` | 关卡生成、洗牌、粒子动画确定；同 `--seed` 必然同一棋盘 |
 
 `boot()` 每次清掉 `js/` 下的 `require.cache`，用于隔离 `adapter`（`isWx` 在模块加载时求值）与 `Save.data` 等模块级单例；`finish()` 会完整还原所有全局。
@@ -130,6 +135,7 @@ npm run test:report
 - 场景按钮坐标一律从 `render()` 产出的 `x/y/w/h` 读取，不硬编码像素；`ui.scenes.test.js` 会遍历场景对象里所有矩形命中区逐个点击。
 - 每个驱动方法记一条 action，`exportActions()` 导出、`replay(actions)` 回放；配合固定 seed 与时钟，同序列必然得到同状态。
 - 道具 / 经济落盘可直接断言 `h.env.storage.get('catlink_save_v2')`，验证的是真正写入存储的值，而非内存引用。
+- 声明式用例的期望字段必须已在 `_fields.yaml` 的 `字段` 表登记，且该点路径在 `before` / `after` 两次 `state()` 快照里都真实存在，否则直接抛错。这挡住了「字段名写错 + `不变` / `为空`」的静默假通过；`specs.test.js` 的契约自检还能发现 `state()` 结构漂移导致字典失效。
 
 ### 4.5 声明式用例（推荐给新用例）
 
@@ -138,9 +144,9 @@ npm run test:report
 | 文件 | 角色 |
 | --- | --- |
 | `test/cases/_fields.yaml` | **公共字典**：中文业务词 → 内部标识。下划线开头，不会被当作用例加载 |
-| `test/cases/<功能域>.<主题>.yaml` | **用例数据**，唯一需要日常编辑的地方；目前 3 个文件 13 个用例 |
-| `test/runner.js` | 执行器：动作注册表 + 断言注册表 + 通用 `runCase()`，不写死业务映射 |
-| `test/specs.test.js` | 注册层：扫描 YAML 并用 `node:test` 注册，约 20 行，没有用例内容 |
+| `test/cases/<功能域>.<主题>.yaml` | **用例数据**，唯一需要日常编辑的地方；目前 3 个文件 17 个用例 |
+| `test/runner.js` | 执行器：动作注册表 + 断言注册表 + 通用 `runCase()`，不写死业务映射；含期望字段校验 |
+| `test/specs.test.js` | 注册层：扫描 YAML 并用 `node:test` 注册，另有 1 个「字典 ↔ `state()`」契约自检用例 |
 
 一个完整用例：
 
@@ -179,7 +185,7 @@ npm run test:report
 | `使用道具` | 道具别名 | 直接调 `useItem()` |
 | `设置存档` | `{ 存档字段: 值 }` | 预置存档 |
 | `设置日期` | ISO 日期 | 固定虚拟时钟 |
-| `关闭弹窗` / `执行定时器` | — | 清弹窗 / 执行排队定时器 |
+| `关闭弹窗` / `执行定时器` | — | 清弹窗 / 跳过等待、立即执行所有排队的 `setTimeout`（正常流程已由 `step()` 按虚拟时钟自动驱动） |
 
 **期望**的键是 `_fields.yaml` 里 `字段` 定义的中文业务词（如 `剩余方块` → `play.remain`），值支持：
 
@@ -193,6 +199,8 @@ npm run test:report
 
 所有中文词到内部标识的映射都在 `_fields.yaml`（`字段` / `枚举` / `按钮` / `模式` / `场景` / `启动` / `存档字段` 七张表），新增字段、按钮、状态值、启动参数只改字典，不用改 `runner.js`。断言操作符也在注册表里，新增比较规则只加一个 `matcher()`。
 
+**字段校验**：`期望` 的键必须出现在 `_fields.yaml` 的 `字段` 表，且 `runner.pathExists()` 会确认该点路径在 `state()` 快照里真实存在（允许值为 `null`）。字典漏项、字段名拼错、`state()` 改结构都会让用例直接失败，而不是静默通过；`specs.test.js` 的契约自检会遍历整张字典再验一遍。新增字段时字典与 `state()` 要同步。
+
 新增用例只需在 `test/cases/*.yaml` 的 `用例` 列表里加一段，或按第 10 节的命名规范新建一个 YAML 文件，然后 `npm run cases`。**什么时候仍要写脚本**：需要 stub 内部方法、监听自定义事件、构造复杂夹具、验证调用顺序或时序的用例，用 `*.test.js` 更直接。
 
 ## 5. 编程接口（`test/harness.js`）
@@ -202,7 +210,7 @@ npm run test:report
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `seed` | `20260101` | 固定 `Math.random` 序列 |
-| `now` | `2026-01-01T12:00:00+08:00` | 初始时间戳，随 `step()` 推进；YAML 用例支持 ISO 字符串 |
+| `now` | `2026-01-01T12:00:00+08:00` | 初始时间戳，随 `step()` 推进；YAML 用 `起始时间`，CLI 用 `--now=ISO` |
 | `width` / `height` | `375` / `667` | 逻辑屏幕尺寸 |
 | `dpr` | `2` | 像素比 |
 | `safeTop` | `0` | 顶部安全区 |
@@ -211,7 +219,7 @@ npm run test:report
 | `skipDailyGift` | `true` | 预置当日已领奖，避免启动时两个每日奖励弹窗 |
 | `imageWidth` / `imageHeight` | `64` / `64` | 假图片尺寸 |
 
-> `dpr` / `safeTop` / `quiet` / `imageWidth` / `imageHeight` 只在脚本接口可用，命令行未暴露。
+> `quiet` / `imageWidth` / `imageHeight` 只在脚本接口可用；`dpr` / `safeTop` 已由 `--dpr` / `--safeTop` 暴露。所有实际生效值都会出现在 CLI 输出的 `boot` 字段里。
 
 ### 5.2 `Harness` 方法
 
@@ -221,7 +229,7 @@ npm run test:report
 | `goto(name, params)` / `push(name, params)` | 切换场景；`play` 支持 `{ level: N }` |
 | `tap(x, y)` / `touch(x, y, 'down' \| 'up')` | 注入触摸；必要时自动补渲一帧 |
 | `closeModals()` | 清空弹窗队列（最多 20 个） |
-| `flushTimers()` | 执行排队的 `setTimeout` |
+| `flushTimers()` | 跳过等待、立即执行所有排队的 `setTimeout`（正常运行已由 `step()` 自动按虚拟时钟驱动） |
 | `play()` | 返回 `play` 场景实例，`.game` 即 `Game` 对象，`._cx(c)/._cy(r)` 给出格子中心像素坐标，`.itemBtns` / `.popupBtns` 是按钮命中区 |
 | `state()` | 全局状态快照（纯 JSON） |
 | `board()` | 棋盘快照 + 当前可消除的一对 |
@@ -260,25 +268,26 @@ console.log(JSON.stringify(snapshot, null, 2));
 | --- | --- |
 | `--scene=NAME` / `--level=N` | 切换场景；`--level` 只在 `play` 生效 |
 | `--seed=N` / `--width=N` / `--height=N` | 确定性参数 |
+| `--now=ISO` / `--dpr=N` / `--safeTop=N` | 虚拟起始时间 / 像素比 / 顶部安全区；实际生效值回显在 `boot` 字段 |
 | `--frames=N` / `--dt=SEC` | 推进帧数与单帧步长 |
 | `--taps=x,y;x,y` | 依次注入点击 |
 | `--board` | 附带棋盘快照与可消除的一对 |
 | `--logs` | 附带被接管的 console 记录 |
-| `--imageFail` | 全部图片加载失败 |
+| `--imageFail[=false]` | 全部图片加载失败；支持 `--imageFail=false` 显式关闭 |
 | `--skipDailyGift=false` | 不预置存档，观察真实的每日奖励弹窗流程 |
 | `--actions='[...]'` / `--actions=@path/to.json` | 回放操作序列（路径相对项目根） |
 
-`actions` 支持的类型：`step` / `goto` / `push` / `tap` / `down` / `up` / `closeModals` / `flushTimers`。使用 `--actions` 且未指定 `--frames` 时不再额外补帧。命令行始终会自动 `closeModals()` 一次。
+`actions` 支持的类型：`step` / `goto` / `push` / `tap` / `down` / `up` / `closeModals` / `flushTimers`。使用 `--actions` 且未指定 `--frames` 时不再额外补帧。**`--actions` 模式由序列完全自描述，不会注入额外的 `closeModals()` 或补帧**（导出的序列可原样循环回放）；普通探测仍会自动清一次启动弹窗。
 
-> Windows PowerShell 下传内联 JSON 建议先赋给变量，或直接用文件，避免引号被吞：
+> Windows PowerShell 下传内联 JSON 建议先赋给变量，或直接用文件，避免引号被吞；`--taps=x,y;x,y` 里的 `;` 同样需要加引号：
 > `$acts = '[{"type":"goto","scene":"shop"},{"type":"step","frames":3}]'; node test/harness.js --actions=$acts`
 
 ## 7. AI 自测推荐流程
 
 1. **准备**：首次 `npm install`（装 `js-yaml`）。
-2. **回归**：`npm test`（约 0.9s，58 个用例）；只想验某一块时用 `npm run catlink` / `catlink:core` / `catlink:play` / `catlink:items` / `engine:smoke` / `ui:scenes` / `meta:economy` / `cases`。需要把结果存成文件时用 `npm run test:report`（见 3.1）。
+2. **回归**：`npm test`（约 0.7s，64 个用例）；只想验某一块时用 `npm run catlink` / `catlink:core` / `catlink:play` / `catlink:items` / `engine:smoke` / `ui:scenes` / `meta:economy` / `cases`。需要把结果存成文件时用 `npm run test:report`（见 3.1），需要覆盖率时用 `npm run coverage`（见 9）。
 3. **定位**：用探针拿 JSON 快照，例如 `--scene=play --level=61 --board`，读 `error` / `consoleErrors` / `play` / `board.pair`。
-4. **固定现场**：记下本次的 `--seed` 与探针输出的 `actions`，两者合起来就是完整的复现输入，失败时原样重跑。
+4. **固定现场**：探针输出的 `boot`（含 seed / now / 尺寸 / dpr / safeTop / imageFail / skipDailyGift）加 `actions` 就是完整复现输入，失败时按 `boot` 里的值传参原样重跑。
 5. **自动驱动**：常规场景优先直接写 `test/cases/*.yaml`（见 4.5）；脚本里也可以用 `h.board().pair` 找可消除的一对，`h.play().game.tapCell(r, c)` 按行列驱动，或 `_cx/_cy` 反算像素后 `h.tap(x, y)` 走真实触摸。
 6. **断言**：优先用 `assertNoError()` 守异常，再断言 `state().play` / `save` 的具体数值；视觉与真机问题另外走人工或截图流程。
 
@@ -289,16 +298,19 @@ console.log(JSON.stringify(snapshot, null, 2));
 - 复杂 L2：照 `engine.smoke.test.js` 的 `withHarness(opts, fn)`，`finally` 里 `h.finish()`。
 - 复杂 L3：照 `catlink.play.test.js` 的 `autoPlay(h, level, useTouch)` / `tapPopup(h, key)`、`catlink.items.test.js` 的 `tapItem(h, key)`、`ui.scenes.test.js` 的 `enter(h, name)` / `collect(h)` / `find(scene, key)`。
 - 注意：不要嵌套 `boot()`；`finish()` 之后不能再调 `state()`；触摸前保证至少渲染过一帧（`touch()` 已自动处理，`_cx/_cy`、`itemBtns`、`popupBtns` 都依赖 `render()` 算出的布局）；`console` 默认被接管。
-- 断言基线以 `docs/catlink.md` 为准（难度阶段、道具、计分、结算规则）。
+- 声明式用例的期望字段必须登记在 `_fields.yaml`，新增字段要同步改 `state()`；字段名写错会直接报错，不会静默通过。
+- 断言基线以 `docs/catlink.md` 为准（难度阶段、道具、计分、结算规则）。能用精确值（如 `喵币: 初始 -50`）就别用 `增加` / `减少` / `> 0` 这类方向性断言；`runner.js` 的 `clearPair()` 会清掉冰 / 翻面 / 锁链标志，属于白盒夹具，相关用例不能当作纯黑盒通关证据。
 
 ## 9. 已知限制与后续扩展
 
-- 当前覆盖率基线（Node 内置覆盖率，排除 `test/` 与 IDE 注入脚本）：**88.49% 行 / 73.96% 分支 / 87.39% 函数**。关键模块：`core/game.js` 97.52%、`scenes/play.js` 94.82%、`core/cats.js` 84.57%、`core/save.js` 97.22%、`core/tasks.js` 98.81%、`scenes/hospital.js` 与 `scenes/select.js` 100%。
+- 覆盖率基线用 `npm run coverage` 复现（Node 内置覆盖率，`--test-coverage-exclude=test/**`；Node 22.22.2 实测）：**约 85.8% 行 / 73.9% 分支 / 82.7% 函数**。不同 Node 版本与排除规则会有零点几个百分点差异，以本地输出为准。关键模块：`core/game.js` 97.52%、`scenes/play.js` 95.85%、`core/cats.js` 84.57%、`core/save.js` 97.22%、`core/tasks.js` 98.81%、`scenes/hospital.js` 与 `scenes/select.js` 100%。
 - **覆盖率 ≠ 正确性**：绘制代码被执行只代表"没抛异常"，因为 canvas 是 noop，一个像素都没被验证。
 - 声明式配置的代价：表达力受限于注册表里的动作与操作符；失败堆栈指向执行器而非 YAML 行，需要靠 `名称` 定位；无法表达 stub / 事件监听 / 时序断言。这正是保留脚本用例的原因。
-- 仍未覆盖：浏览器预览分支（`adapter.js:25-31`、`:153-157`，`render.js:616-628`）、`ui/catRig.js` / `ui/cozy.js` 等纯绘制分支、`home2.js` 装饰动画、`catroom.js` 抚摸 / 换装分支，以及视觉、真机兼容、性能、音频、分包真实下载。
+- 仍未覆盖：浏览器预览分支（`adapter.js:25-31`、`:153-157`，`render.js:616-628`）、`__FORCE_SIZE` / `__RIG_TIME` / `__RIG_POSE` 等预览钩子、`ui/catRig.js` / `ui/cozy.js` 等纯绘制分支、`home2.js` 装饰动画、`catroom.js` 抚摸 / 换装分支、`wx.loadSubpackage` 的 fail 分支、`onTouchMove/Cancel`、`wx.onError/onHide`，以及视觉、真机兼容、性能、音频、分包真实下载。
+- 测试环境是「wx 平台 API + 浏览器式 `window`」的混合体（见 4.2）：真机上不存在的 `window` 分支在这里会走到，涉及真机专属行为的问题仍需人工 / 真机验证。
 - 假 Canvas 不做像素断言，图片也不读真实 PNG。要做视觉回归，可另建静态预览页 + Playwright 截图对比；项目里已有的 `window.__FORCE_SIZE`、`__RIG_TIME`、`__RIG_POSE` 钩子正是为此准备的。
-- 依赖只有 `js-yaml`，且只用于测试期；`node_modules/`、`package.json`、`package-lock.json`、`test/` 都不会打进小游戏包体。
+- 依赖只有 `js-yaml`（`devDependencies`），且只用于测试期；`node_modules/`、`package.json`、`package-lock.json`、`test/`、`docs/`、`README.md` 都由 `project.config.json` 的 `packOptions.ignore` 排除，不会打进小游戏包体。
+- CI 已接入 `.github/workflows/test.yml`：push / PR / 手动触发，`npm ci` → `npm run test:report`（退出码即门禁）→ `npm run coverage`；固定 `TZ=Asia/Shanghai` 让跨天用例稳定，JUnit XML 上传为 artifact（保留 14 天）。
 
 ## 10. 命名规范与文件清单
 
@@ -324,30 +336,32 @@ test/cases/<功能域>.<主题>.yaml   声明式用例
 - 每个功能域内按主题拆文件，主题相近的合并到同一文件并用分组注释隔开：`catlink.core.test.js` 合并了逻辑单测与全关卡扫描，`catlink.play.test.js` 合并了自动通关与局内流程。
 - **下划线开头**表示字典 / 公共数据而不是用例：`cases/_fields.yaml` 会被 `caseFiles()` 跳过。
 - 跨功能域共用的基建不加前缀：`env.js`（假运行时）、`harness.js`（驱动 + CLI）、`runner.js`（声明式执行器）、`report.js`（结果落盘）。
-- `specs.test.js` 是唯一不带功能域前缀的 `*.test.js`：它扫描全部 YAML 并注册用例，本身不含用例内容。
+- `specs.test.js` 是唯一不带功能域前缀的 `*.test.js`：它扫描全部 YAML 并注册用例，另含 1 个字典契约自检用例。
 - 分组 npm 脚本与前缀对齐：`<功能域>:<主题>`（`npm run catlink:play`），`npm run catlink` 跑该域全部文件；`cases` 是声明式层的专用别名。
-- `test/results/` 只存放每次运行的独立报告（带时间戳、不覆盖），不是测试文件，已由 `.gitignore` 排除（见 3.1）。
+- `test/results/` 只存放每次运行的独立报告（带时间戳、不覆盖），不是测试文件，已由 `.gitignore` 排除（见 3.1）；默认保留最近 50 份，用 `TEST_REPORT_KEEP` 调整。
 
 ### 10.2 文件清单
 
 | 文件 | 类型 | 作用 |
 | --- | --- | --- |
-| `test/env.js` | 基建 | 假运行时：wx / Canvas / Image / 定时器 / 时钟 / 随机种子 |
-| `test/harness.js` | 基建 + CLI | 启动、逐帧与触摸驱动、状态快照、操作回放、命令行探针 |
-| `test/runner.js` | 基建 | YAML 用例执行器：动作注册表、断言注册表、通用 `runCase()` |
-| `test/report.js` | 基建 | 每次运行生成一份带时间戳的独立 JUnit 报告，不覆盖历史（见 3.1） |
-| `test/specs.test.js` | 注册层 | 扫描 YAML 注册 13 个声明式用例，本身无用例内容 |
+| `test/env.js` | 基建 | 假运行时：wx / Canvas / Image / 按虚拟时钟驱动的定时器 / 时钟 / 随机种子 |
+| `test/harness.js` | 基建 + CLI | 启动、逐帧与触摸驱动、状态快照、操作回放、命令行探针（含 `boot` 复现参数） |
+| `test/runner.js` | 基建 | YAML 用例执行器：动作注册表、断言注册表、通用 `runCase()`、期望字段校验 |
+| `test/report.js` | 基建 | 每次运行生成一份带时间戳的独立 JUnit 报告，不覆盖历史、默认保留最近 50 份（见 3.1） |
+| `test/specs.test.js` | 注册层 | 扫描 YAML 注册 17 个声明式用例 + 1 个字典契约自检 |
 | `test/cases/_fields.yaml` | **字典（配置）** | 中文业务词 ↔ 内部标识的 7 张映射表 |
-| `test/cases/engine.smoke.yaml` | **用例（配置）** | 启动 / 渲染 / 缺图兜底 / 每日弹窗，4 个 |
-| `test/cases/catlink.play.yaml` | **用例（配置）** | 连连看自动通关与配对，4 个 |
+| `test/cases/engine.smoke.yaml` | **用例（配置）** | 启动 / 渲染 / 缺图兜底 / 每日弹窗 / 缺图重试链 / 窄屏 / 起始时间，7 个 |
+| `test/cases/catlink.play.yaml` | **用例（配置）** | 连连看自动通关与配对 / 场景栈压入，5 个 |
 | `test/cases/catlink.items.yaml` | **用例（配置）** | 道具、弹窗流程、炸弹选格，5 个 |
 | `test/catlink.core.test.js` | 用例（脚本） | 9 个：7 个逻辑层单测 + 2 个全关卡扫描 |
 | `test/catlink.play.test.js` | 用例（脚本） | 13 个：6 个自动通关 + 7 个局内流程与弹窗 |
 | `test/catlink.items.test.js` | 用例（脚本） | 5 个道具全分支 |
-| `test/engine.smoke.test.js` | 用例（脚本） | 7 个引擎级无界面冒烟 |
+| `test/engine.smoke.test.js` | 用例（脚本） | 8 个引擎级无界面冒烟（含图片失败重试恢复） |
 | `test/ui.scenes.test.js` | 用例（脚本） | 5 个场景交互矩阵 |
 | `test/meta.economy.test.js` | 用例（脚本） | 6 个每日奖励 / 养成 / 经济 |
-| `test/results/` | **结果（gitignore）** | 每次运行一份 `<时间戳>.xml`，历史不覆盖、不入库、不打包（见 3.1） |
-| `package.json` / `package-lock.json` | 配置 | 依赖 `js-yaml`、`test` / `test:report` 及按功能域划分的分组脚本 |
+| `test/results/` | **结果（gitignore）** | 每次运行一份 `<时间戳>.xml`，历史不覆盖、不入库、不打包，默认保留最近 50 份（见 3.1） |
+| `package.json` / `package-lock.json` | 配置 | `devDependencies: js-yaml`、`engines.node`、`test` / `test:report` / `coverage` 及按功能域划分的分组脚本 |
 | `.gitignore` | 配置 | 排除 `test/results/`、个人配置、素材原图等 |
+| `project.config.json` | 配置 | `packOptions.ignore` 排除测试目录、npm 文件、`docs/`、`README.md`，均不进小游戏包体 |
+| `.github/workflows/test.yml` | **CI** | GitHub Actions：`npm ci` → `npm run test:report` → `npm run coverage`，固定 TZ、上传 JUnit artifact |
 | `README.md` | 文档 | 项目简介与本文档链接 |

@@ -48,6 +48,16 @@ function num(v) {
 function get(obj, dotPath) {
   return String(dotPath).split('.').reduce(function (o, k) { return o == null ? undefined : o[k]; }, obj);
 }
+/** 字段路径是否真实存在于快照里（允许值为 null / undefined，但路径必须存在） */
+function pathExists(obj, dotPath) {
+  var keys = String(dotPath).split('.'), cur = obj;
+  for (var i = 0; i < keys.length; i++) {
+    if (cur === null || cur === undefined || typeof cur !== 'object') return false;
+    if (!Object.prototype.hasOwnProperty.call(cur, keys[i])) return false;
+    cur = cur[keys[i]];
+  }
+  return true;
+}
 
 function tapRect(h, b) { h.tap(b.x + b.w / 2, b.y + b.h / 2); }
 function tapKey(h, list, key) {
@@ -116,7 +126,10 @@ function autoPlay(h, mode) {
 var ACTIONS = Object.create(null);
 function def(name, fn) { ACTIONS[name] = fn; }
 
-def('推进', function (h, v) { h.step(num(v) || 1); });
+def('推进', function (h, v) {
+  var n = num(v);
+  h.step(n === undefined ? 1 : n);
+});
 def('进入', function (h, v) { h.goto(alias(SCENE, v)); });
 def('压入', function (h, v) { h.push(alias(SCENE, v)); });
 def('点击', function (h, v) {
@@ -222,8 +235,15 @@ function runCase(def, defaults) {
       fn(h, step[name]);
     });
     var after = h.state();
+    var caseName = def['名称'] || '未命名用例';
     Object.keys(def['期望'] || {}).forEach(function (label) {
-      var dot = alias(FIELD, label);
+      if (!has(FIELD, label)) {
+        throw new Error('用例「' + caseName + '」的期望字段「' + label + '」未在 _fields.yaml 的「字段」表登记');
+      }
+      var dot = FIELD[String(label)];
+      if (!pathExists(before, dot) || !pathExists(after, dot)) {
+        throw new Error('用例「' + caseName + '」的字段「' + label + '」(' + dot + ') 在 state() 快照中不存在，检查字典或 state() 结构');
+      }
       var expected = resolveValue(def['期望'][label]);
       verify(get(after, dot), expected, label + '(' + dot + ')', get(before, dot));
     });
@@ -239,6 +259,7 @@ module.exports = {
   ACTIONS: ACTIONS,
   MATCHERS: MATCHERS,
   DICT: DICT,
+  pathExists: pathExists,
   caseFiles: function () {
     return fs.readdirSync(CASES_DIR)
       .filter(function (f) { return /\.ya?ml$/.test(f) && f.charAt(0) !== '_'; })

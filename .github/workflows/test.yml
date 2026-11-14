@@ -1,0 +1,45 @@
+name: headless-tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Save.todayKey() 用本地日期，固定时区让跨天用例在 CI 上稳定
+      TZ: Asia/Shanghai
+      TEST_REPORT_KEEP: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Run headless tests (spec + JUnit)
+        run: npm run test:report
+
+      - name: Coverage
+        if: success()
+        run: npm run coverage
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report-${{ github.run_id }}
+          path: test/results/*.xml
+          if-no-files-found: warn
+          retention-days: 14

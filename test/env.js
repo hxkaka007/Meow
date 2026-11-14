@@ -123,7 +123,8 @@ function installEnv(opts) {
   var quiet = opts.quiet !== false;
   var noop = function () { };
   var timerId = 0;
-  var intervalCleared = false;
+  var intervals = new Map();
+  env.intervals = intervals;
 
   var saved = {
     wx: global.wx, hasWx: 'wx' in global,
@@ -185,32 +186,83 @@ function installEnv(opts) {
   global.requestAnimationFrame = function (fn) { env.raf = fn; return ++timerId; };
   global.cancelAnimationFrame = noop;
 
+  function runTimer(t) {
+    try { t.fn(); } catch (e) { env.errors.push('[timer] ' + (e.stack || e)); }
+  }
+
   global.setTimeout = function (fn, delay) {
     var id = ++timerId;
-    env.timers.push({ id: id, fn: fn, delay: delay || 0 });
+    env.timers.push({ id: id, fn: fn, due: env.clock.now + (Number(delay) || 0) });
     return id;
   };
   global.clearTimeout = function (id) {
     env.timers = env.timers.filter(function (t) { return t.id !== id; });
   };
-  // 同步把轮询跑完：假图片是同步加载的，preload / waitImages 不会留下挂起定时器
-  global.setInterval = function (fn) {
-    intervalCleared = false;
+  // interval 只注册、不自动跑：由 step() 按虚拟时钟触发，或 boot() 里 drainIntervals() 排空
+  global.setInterval = function (fn, delay) {
     var id = ++timerId;
-    for (var i = 0; i < 120 && !intervalCleared; i++) {
-      fn();
-      env.clock.advance(100);
-    }
+    var d = Number(delay) || 100;
+    intervals.set(id, { fn: fn, delay: d, next: env.clock.now + d });
     return id;
   };
-  global.clearInterval = function () { intervalCleared = true; };
+  global.clearInterval = function (id) { intervals.delete(id); };
 
+  /** 执行所有到期的 setTimeout，由 Harness.step() 每帧调用，语义与真机一致 */
+  env.tickTimers = function () {
+    var guard = 0;
+    while (guard++ < 500) {
+      var due = null;
+      for (var i = 0; i < env.timers.length; i++) {
+        if (env.timers[i].due <= env.clock.now && (!due || env.timers[i].due < due.due)) due = env.timers[i];
+      }
+      if (!due) break;
+      env.timers.splice(env.timers.indexOf(due), 1);
+      runTimer(due);
+    }
+  };
+
+  /** 执行所有到期的 setInterval；回调内 clearInterval(id) 会按 id 立即生效 */
+  env.tickIntervals = function () {
+    var guard = 0;
+    while (guard++ < 200) {
+      var due = null, dueId = null;
+      intervals.forEach(function (it, id) {
+        if (it.next <= env.clock.now && (!due || it.next < due.next)) { due = it; dueId = id; }
+      });
+      if (!due) break;
+      due.next += due.delay;
+      try { due.fn(); } catch (e) {
+        env.errors.push('[interval] ' + (e.stack || e));
+        intervals.delete(dueId);
+      }
+    }
+  };
+
+  /**
+   * 仅用于 boot()：启动期 preload 轮询必须排空，否则 missingAssets 不会有值。
+   * 故意不推进业务时钟（preload 的 waited 自行累加），避免 Date.now() 被偷偷推走。
+   */
+  env.drainIntervals = function (maxTicks) {
+    var limit = maxTicks || 200, n = 0;
+    while (intervals.size && n++ < limit) {
+      Array.from(intervals.entries()).forEach(function (entry) {
+        var id = entry[0], it = entry[1];
+        if (!intervals.has(id)) return;
+        it.next += it.delay;
+        try { it.fn(); } catch (e) {
+          env.errors.push('[interval] ' + (e.stack || e));
+          intervals.delete(id);
+        }
+      });
+    }
+    return n;
+  };
+
+  /** 显式跳过等待、立即执行所有排队的 setTimeout（YAML 的「执行定时器」动作） */
   env.flushTimers = function () {
-    var list = env.timers.slice().sort(function (a, b) { return a.delay - b.delay; });
+    var list = env.timers.slice().sort(function (a, b) { return a.due - b.due; });
     env.timers = [];
-    list.forEach(function (t) {
-      try { t.fn(); } catch (e) { env.errors.push('[timer] ' + (e.stack || e)); }
-    });
+    list.forEach(runTimer);
   };
 
   env.clock.install();
@@ -218,6 +270,8 @@ function installEnv(opts) {
 
   env.restore = function () {
     Math.random = REAL_RANDOM;
+    intervals.clear();
+    env.timers.length = 0;
     env.clock.restore();
     if (saved.hasWx) global.wx = saved.wx; else delete global.wx;
     if (saved.hasWindow) global.window = saved.window; else delete global.window;

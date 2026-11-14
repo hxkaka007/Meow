@@ -40,6 +40,7 @@ function boot(opts) {
     env.storage.set('catlink_save_v2', { dailyGiftDay: core('save').todayKey() });
   }
   require(GAME);
+  env.drainIntervals();   // 排空启动期 preload 轮询；不推进业务时钟
   var engine = globalThis.__engine;
   if (!engine) {
     env.restore();
@@ -65,6 +66,8 @@ Harness.prototype.step = function (frames, dt) {
   dt = dt == null ? 1 / 60 : dt;
   for (var i = 0; i < frames; i++) {
     this.env.clock.advance(dt * 1000);
+    this.env.tickTimers();
+    this.env.tickIntervals();
     this.env.raf(this.env.clock.now);
   }
   this.frames += frames;
@@ -214,17 +217,44 @@ function parseArgs(argv) {
   return out;
 }
 
+function boolArg(v) {
+  if (v === undefined || v === true) return true;
+  if (v === false) return false;
+  return !/^(false|0|no|off)$/i.test(String(v));
+}
+
+function bootArgs(a) {
+  var num = function (k) { return a[k] === undefined ? undefined : Number(a[k]); };
+  var now = a.now === undefined ? undefined : Date.parse(String(a.now));
+  if (now !== undefined && isNaN(now)) throw new Error('--now 不是合法日期: ' + a.now);
+  return {
+    seed: num('seed'), now: now,
+    width: num('width'), height: num('height'),
+    dpr: num('dpr'), safeTop: num('safeTop'),
+    imageFail: a.imageFail === undefined ? false : boolArg(a.imageFail),
+    skipDailyGift: a.skipDailyGift === undefined ? true : boolArg(a.skipDailyGift)
+  };
+}
+
+/** CLI 输出带上实际生效的启动参数，配合 actions 即可完整复现一次运行 */
+function effectiveBoot(h) {
+  return {
+    seed: h.env.seed,
+    now: new Date(h.env.clock.now).toISOString(),
+    width: h.env.width, height: h.env.height,
+    dpr: h.env.dpr, safeTop: h.opts.safeTop || 0,
+    imageFail: h.env.imageFail,
+    skipDailyGift: h.opts.skipDailyGift !== false,
+    quiet: h.opts.quiet !== false
+  };
+}
+
 if (require.main === module) {
   var a = parseArgs(process.argv.slice(2));
-  var h = boot({
-    seed: a.seed === undefined ? undefined : Number(a.seed),
-    width: a.width === undefined ? undefined : Number(a.width),
-    height: a.height === undefined ? undefined : Number(a.height),
-    imageFail: !!a.imageFail,
-    skipDailyGift: a.skipDailyGift !== undefined ? a.skipDailyGift !== 'false' : true
-  });
-  var out = {}, fatal = null;
+  var out = {}, fatal = null, h = null;
   try {
+    h = boot(bootArgs(a));
+    out.boot = effectiveBoot(h);
     if (a.actions) {
       var acts = String(a.actions).charAt(0) === '@'
         ? JSON.parse(fs.readFileSync(path.resolve(ROOT, String(a.actions).slice(1)), 'utf8'))
@@ -232,7 +262,8 @@ if (require.main === module) {
       h.replay(acts);
     }
     if (a.scene) h.goto(String(a.scene), a.level ? { level: Number(a.level) } : undefined);
-    h.closeModals();
+    // actions 模式由序列完全自描述，不再注入额外动作；普通探测仍清一次启动弹窗
+    if (!a.actions) h.closeModals();
     if (a.taps) {
       String(a.taps).split(';').forEach(function (pair) {
         var xy = pair.split(',').map(Number);
@@ -242,16 +273,16 @@ if (require.main === module) {
     // actions 模式由序列完全自描述，不再额外补帧；普通探测默认渲染 1 帧
     if (a.frames !== undefined) h.step(Number(a.frames), a.dt ? Number(a.dt) : undefined);
     else if (!a.actions) h.step(1);
-    out = h.state();
+    out = Object.assign(out, h.state());
     if (a.board) out.board = h.board();
     if (a.logs) out.logs = h.env.logs;
     h.assertNoError();
   } catch (e) {
     fatal = String((e && (e.stack || e.message)) || e);
   }
-  out.actions = h.exportActions();
+  out.actions = h ? h.exportActions() : [];
   if (fatal) out.fatal = fatal;
-  h.finish();
+  if (h) h.finish();
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
   process.exitCode = fatal ? 1 : 0;
 }

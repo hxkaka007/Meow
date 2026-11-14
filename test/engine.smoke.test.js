@@ -101,7 +101,7 @@ test('同一操作序列回放得到完全一致的状态', function () {
   var a = withHarness({ seed: 99 }, function (h) { h.replay(actions); return h.state(); });
   var b = withHarness({ seed: 99 }, function (h) { h.replay(actions); return h.state(); });
   assert.deepEqual(a, b);
-  assert.equal(a.fatal, undefined);
+  assert.equal(a.frames, 30, '20 + 10 帧应全部被回放');
 });
 
 test('所有图片加载失败时兜底渲染仍不崩溃', function () {
@@ -110,6 +110,25 @@ test('所有图片加载失败时兜底渲染仍不崩溃', function () {
     var s = h.state();
     assert.ok(s.missingAssets.length > 0, '应能报告缺失资源清单');
     assert.equal(s.error, null);
+    h.assertNoError();
+  });
+});
+
+test('图片失败重试按虚拟时钟执行，资源恢复后写回图片缓存', function () {
+  withHarness({ imageFail: true }, function (h) {
+    var e = h.engine;
+    function loaded() {
+      return Object.keys(e._imgs || {}).filter(function (k) { return !!e._imgs[k]; }).length;
+    }
+    assert.ok(h.state().missingAssets.length > 0, '启动期应报告缺失资源');
+    var queued = h.env.timers.length;
+    assert.ok(queued > 0, '每张失败的图都应排队一次重试');
+    assert.equal(loaded(), 0, '启动时图片缓存应为空');
+
+    h.env.imageFail = false;   // 模拟加载恢复
+    h.step(30);                // 虚拟时间推进 0.5s，触发 400ms 那批重试
+    assert.ok(loaded() > 0, '重试成功后应把图片写回缓存');
+    assert.ok(h.env.timers.length < queued, '到期定时器应被执行并移出队列');
     h.assertNoError();
   });
 });

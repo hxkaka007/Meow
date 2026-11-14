@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "description": "Meow 微信小游戏的无界面自测基座（需 Node 18+，YAML 用例依赖 js-yaml）",
-  "dependencies": {
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
     "js-yaml": "^4.1.0"
   },
   "scripts": {
     "test": "node --test test/catlink.core.test.js test/catlink.play.test.js test/catlink.items.test.js test/engine.smoke.test.js test/ui.scenes.test.js test/meta.economy.test.js test/specs.test.js",
     "test:report": "node test/report.js",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude=\"test/**\" test/catlink.core.test.js test/catlink.play.test.js test/catlink.items.test.js test/engine.smoke.test.js test/ui.scenes.test.js test/meta.economy.test.js test/specs.test.js",
     "catlink":"node --test test/catlink.core.test.js test/catlink.play.test.js test/catlink.items.test.js",
     "catlink:core": "node --test test/catlink.core.test.js",
     "catlink:play": "node --test test/catlink.play.test.js",
