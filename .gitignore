@@ -7,6 +7,9 @@ _breed_originals/
 # 本地构建脚本、调试截图、验证中间产物与工作记录（195MB）
 .workbuddy/
 
+# 测试结果报告（junit / spec，由 npm run test:report 生成）
+test/results/
+
 # 常见噪音
 node_modules/
 .DS_Store

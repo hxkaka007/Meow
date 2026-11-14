@@ -315,7 +315,7 @@ CatRoom.prototype._doAction = function (act, cat) {
   var inv = Save.get('inventory');
   if (act === 'feed') {
     // 优先用高级粮
-    var foodId = (inv.food_can || 0) > 0 ? 'food_can' : ((inv.food_pudding || 0) > 0 ? 'food_pudding' : 'food_basic');
+    var foodId = (inv.food_can || 0) > 0 ? 'food_can' : ((inv.food_milk || 0) > 0 ? 'food_milk' : 'food_basic');
     if ((inv[foodId] || 0) <= 0) { this.engine.toast(I.t('shopNoCoin')); return; }
     inv[foodId]--;
     Save.set('inventory', inv);

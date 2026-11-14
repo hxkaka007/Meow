@@ -13,6 +13,18 @@
       {
         "value": "_breed_originals",
         "type": "folder"
+      },
+      {
+        "value": "test",
+        "type": "folder"
+      },
+      {
+        "value": "package.json",
+        "type": "file"
+      },
+      {
+        "value": "package-lock.json",
+        "type": "file"
       }
     ],
     "include": []

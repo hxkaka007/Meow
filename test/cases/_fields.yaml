@@ -1,0 +1,93 @@
+# 公共字典：所有「中文业务词 <-> 内部标识」的对应关系都在这里。
+# 新增字段、按钮、状态值、启动参数时只改本文件，不用改 runner.js。
+# 下划线开头的文件不会被当作用例文件加载。
+
+# 期望字段：中文业务词 -> state() 返回值的点路径
+字段:
+  场景: scene
+  场景栈: stack
+  弹窗: modal
+  脚本错误: error
+  控制台错误数: consoleErrors.length
+  缺失资源数: missingAssets.length
+  已推进帧数: frames
+  点击次数: tapCount
+  已解锁关卡: save.maxLevel
+  喵币: save.coin
+  存档道具: save.props
+  对局状态: play.state
+  分数: play.score
+  连击: play.combo
+  剩余方块: play.remain
+  剩余时间: play.timeLeft
+  剩余步数: play.stepsLeft
+  局内道具: play.items
+  结算弹窗: play.popup
+  关卡: play.level
+  提示道具数: play.items.hint
+  洗牌道具数: play.items.shuffle
+  炸弹道具数: play.items.bomb
+  加时道具数: play.items.time
+  存档提示道具数: save.props.hint
+
+# 期望值别名：让配置里可以写「胜利」而不是 win
+枚举:
+  进行中: playing
+  胜利: win
+  失败: lose
+  暂停中: pause
+  商店中: shop
+  真实: true
+  假: false
+  空: null
+
+# 按钮 / 道具别名：中文 -> 场景里的按钮 key
+按钮:
+  提示: hint
+  洗牌: shuffle
+  炸弹: bomb
+  加时: time
+  暂停: pause
+  返回: back
+  继续: resume
+  商店: shop
+  关闭商店: closeShop
+  买提示: buy_hint
+  下一关: next
+  重试: retry
+  回主页: home
+  选关: select
+
+# 自动通关模式
+模式:
+  触摸: touch
+  逻辑: logic
+  真实规则: specials
+
+# 场景别名
+场景:
+  主页: home
+  对局: play
+  选关页: select
+  商城: shop
+  背包: bag
+  任务: task
+  猫窝: cats
+  医院: hospital
+
+# boot() 参数别名
+启动:
+  种子: seed
+  图片全部失败: imageFail
+  跳过每日奖励: skipDailyGift
+  宽度: width
+  高度: height
+  起始时间: now
+
+# Save.set() 的键别名
+存档字段:
+  喵币: coin
+  已解锁关卡: maxLevel
+  道具: props
+  库存: inventory
+  音乐: music

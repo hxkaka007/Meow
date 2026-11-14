@@ -1,0 +1,23 @@
+{
+  "name": "meow-headless",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Meow 微信小游戏的无界面自测基座（需 Node 18+，YAML 用例依赖 js-yaml）",
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "scripts": {
+    "test": "node --test test/catlink.core.test.js test/catlink.play.test.js test/catlink.items.test.js test/engine.smoke.test.js test/ui.scenes.test.js test/meta.economy.test.js test/specs.test.js",
+    "test:report": "node test/report.js",
+    "catlink":"node --test test/catlink.core.test.js test/catlink.play.test.js test/catlink.items.test.js",
+    "catlink:core": "node --test test/catlink.core.test.js",
+    "catlink:play": "node --test test/catlink.play.test.js",
+    "catlink:items": "node --test test/catlink.items.test.js",
+    "engine:smoke": "node --test test/engine.smoke.test.js",
+    "ui:scenes": "node --test test/ui.scenes.test.js",
+    "meta:economy": "node --test test/meta.economy.test.js",
+    "cases": "node --test test/specs.test.js",
+    "probe": "node test/harness.js",
+    "probe:play": "node test/harness.js --scene=play --level=1 --frames=60"
+  }
+}
